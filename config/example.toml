@@ -1,0 +1,26 @@
+# Sum100 example configuration.
+#
+# Not parsed by any code yet; this documents the intended shape so the loader in
+# a later phase has a target. Copy to config/local.toml to customize.
+
+[engine]
+# Quotes older than this are treated as stale and never produce a signal.
+max_book_age_ms = 500
+# Minimum net profit, in integer cents, for a candidate to be reported.
+min_net_edge_cents = 1
+# Minimum annualized return on locked capital, as a ratio (0.15 = 15%).
+min_annualized_return = 0.15
+# Cap on contracts per leg.
+max_position_size = 500
+
+[venues.kalshi]
+enabled = true
+fee_multiplier = 1.0
+
+[venues.polymarket]
+enabled = false
+
+[recorder]
+enabled = true
+output_dir = "data"
+compress = true
