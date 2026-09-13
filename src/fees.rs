@@ -60,3 +60,44 @@ mod tests {
         assert_eq!(fees.taker_fee(3, 100), 21);
     }
 }
+
+#[cfg(test)]
+mod ladder_tests {
+    use super::*;
+
+    /// Verify the defining inequalities of the ceiling, independently of the
+    /// implementation's add-denominator-minus-one division. This catches both
+    /// understating the fee and charging an unnecessary extra cent.
+    #[test]
+    fn every_tick_is_the_smallest_cent_covering_the_exact_fee() {
+        for price in 1..=99 {
+            for qty in [0, 1, 2, 7, 99, 100, 101, 499, 500] {
+                for (numer, denom) in [(1, 1), (1, 2), (3, 2), (2, 1)] {
+                    let model = KalshiFees {
+                        multiplier_numer: numer,
+                        multiplier_denom: denom,
+                    };
+                    let fee = model.taker_fee(price, qty);
+                    let exact_numerator = 7i128
+                        * i128::from(qty)
+                        * i128::from(price)
+                        * i128::from(100 - price)
+                        * i128::from(numer);
+                    let denominator = 10_000i128 * i128::from(denom);
+                    let charged = i128::from(fee) * denominator;
+                    assert!(
+                        charged >= exact_numerator,
+                        "undercharge at p={price}, q={qty}"
+                    );
+                    assert!(
+                        charged - exact_numerator < denominator,
+                        "excess cent at p={price}, q={qty}"
+                    );
+                    assert_eq!(fee, model.taker_fee(100 - price, qty));
+                }
+            }
+        }
+        assert_eq!(KalshiFees::default().taker_fee(0, 100), 0);
+        assert_eq!(KalshiFees::default().taker_fee(100, 100), 0);
+    }
+}
