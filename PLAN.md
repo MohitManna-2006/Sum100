@@ -5,9 +5,9 @@ Planning horizon: 14 weeks from start.
 ## Current checkpoint — September 13, 2026
 
 The imported plan is a roadmap, not a claim that its future components exist.
-The active authorization is **phase 1, stage 2**. The later session decisions
-supersede the original `new_size`, bid/ask normalization, unauthenticated public
-WebSocket, and parsed-event recorder assumptions.
+Phase 1 stage 2 and **phase 2 (book store)** are implemented. Later session
+decisions supersede the original `new_size`, bid/ask normalization,
+unauthenticated public WebSocket, and parsed-event recorder assumptions.
 
 - Foundations: existing fee/depth/freshness example tests, integer-cent parser,
   whole-contract floor parser, interned ContractId, and feed boundary are present.
@@ -16,15 +16,20 @@ WebSocket, and parsed-event recorder assumptions.
   pre-parse recording, bounded event delivery, reconnect logic, metrics, and CLI.
   Fixtures include original full payloads and a fresh snapshot plus 460 consecutive
   deltas, including 209 real no-side deltas.
+- Phase 2: `Book` / `BookState` with dense yes/no size arrays, `100 - P`
+  complement conversion, `BookStore` with subscription-scoped sequence tracking,
+  gap detection, forced-reconnect resync via `KalshiFeed::request_resync`, book
+  metrics, and the `dump` subcommand. Floor drift clamps at zero; crossed books
+  stay `Live` and are counted. Fixture replay pins the final best bid/ask for
+  the stage 2 live session.
 - Validation: the fresh fixture capture ran 70 seconds (462 frames, 17,982 bytes).
   A subsequent 65-second run exercised the final recorder/lock implementation:
   277 frames, 14,507 compressed bytes, zero parse errors. These are stage 2 smoke tests, not an hour-long
-  endurance test or a tick-to-signal benchmark.
-- Pending phase 1 acceptance: an hour-long endurance session. Sequence-gap
-  detection and recovery remain the explicitly scoped phase 2 responsibility;
-  no book state machine or live recovery claim is made at this checkpoint.
-- BookState, EventId, registry/config loading, replay scheduling, extended solver
-  properties, execution, second venue, and UI remain future phase work.
+  endurance test or a tick-to-signal benchmark. Offline book-store tests pass;
+  the thirty-minute live side-by-side check against the Kalshi UI remains an
+  operator verification step via `dump`.
+- Pending: hour-long endurance session; phase 3 replay; registry/config;
+  extended solver properties; execution; second venue; UI.
 
 Use [README.md](README.md) for working commands and setup. The supplied original
 README is preserved verbatim as [README.reference.md](README.reference.md);

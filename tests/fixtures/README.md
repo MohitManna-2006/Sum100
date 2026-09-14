@@ -21,7 +21,7 @@ are preserved. No payload was synthesized.
   Sides: 251 yes, 209 no. Every raw text message from this session is included.
 - `no-side-delta.json`: byte-for-byte copy of seq 4 from the fresh session.
   Wire side is `no`, price is `0.5500`, delta is `-1000.00`. The feed must retain
-  price 55; phase 2 will own its complement conversion. This message is also
+  price 55; the book store converts it to a yes ask at 45. This message is also
   present in the full sequence, so it can be replayed in context.
 
 Fresh recording command:

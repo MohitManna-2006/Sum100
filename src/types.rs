@@ -12,20 +12,211 @@ pub struct Level {
     pub size: i64,
 }
 
+/// Whether a book is trustworthy for solver evaluation.
+///
+/// The solver refuses any group containing a book that is not [`Live`]. A
+/// sequence gap or disconnect moves the book to [`Resyncing`] until a fresh
+/// snapshot arrives; there is no attempt to repair intermediate state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BookState {
+    /// Subscribed, no snapshot yet.
+    Uninitialized,
+    /// Gap or disconnect; awaiting a fresh snapshot.
+    Resyncing,
+    /// Snapshot applied, deltas in sequence.
+    Live,
+}
+
+/// In-memory order book for one contract.
+///
+/// Kalshi sends two one-sided bid books (`yes` and `no`). A resting no bid at
+/// price P is economically a yes ask at `100 - P`. Prices are integer cents in
+/// `0..=100`, so each side is a dense size-by-price array: delta application is
+/// a single index, and memory is bounded by construction.
 #[derive(Debug, Clone)]
 pub struct Book {
     pub venue: Venue,
-    pub contract_id: u32,
-    pub asks: Vec<Level>,
+    pub contract_id: ContractId,
+    pub state: BookState,
     pub seq: u64,
     pub updated_at_ms: u64,
+    /// Resting yes bid size by price (cents 0..=100).
+    yes: [i64; 101],
+    /// Resting no bid size by price (cents 0..=100).
+    no: [i64; 101],
 }
 
 impl Book {
+    pub fn new(venue: Venue, contract_id: ContractId) -> Self {
+        Self {
+            venue,
+            contract_id,
+            state: BookState::Uninitialized,
+            seq: 0,
+            updated_at_ms: 0,
+            yes: [0; 101],
+            no: [0; 101],
+        }
+    }
+
     pub fn is_fresh(&self, now_ms: u64, max_age_ms: u64) -> bool {
-        now_ms.saturating_sub(self.updated_at_ms) <= max_age_ms
+        self.state == BookState::Live && now_ms.saturating_sub(self.updated_at_ms) <= max_age_ms
+    }
+
+    /// Replace both sides from a venue snapshot. Absolute state — always applied.
+    ///
+    /// Returns the number of levels whose floored size was already zero (they
+    /// still occupy a wire slot but contribute no executable depth).
+    pub fn apply_snapshot(
+        &mut self,
+        yes: &[Level],
+        no: &[Level],
+        seq: u64,
+        ts_ms: u64,
+    ) -> Result<(), BookApplyError> {
+        let mut yes_arr = [0i64; 101];
+        let mut no_arr = [0i64; 101];
+        for level in yes {
+            Self::set_level(&mut yes_arr, level.price, level.size)?;
+        }
+        for level in no {
+            Self::set_level(&mut no_arr, level.price, level.size)?;
+        }
+        self.yes = yes_arr;
+        self.no = no_arr;
+        self.seq = seq;
+        self.updated_at_ms = ts_ms;
+        self.state = BookState::Live;
+        Ok(())
+    }
+
+    /// Apply a signed size change on one wire side at one price.
+    ///
+    /// Floor drift can drive a level negative when a fractional snapshot size
+    /// floored to zero and a later fractional remove floors to -1. Clamp to
+    /// zero and report the clamp; do not resync — understating depth is the
+    /// safe direction.
+    pub fn apply_delta(
+        &mut self,
+        side: Side,
+        price: Cents,
+        size_delta: i64,
+        seq: u64,
+        ts_ms: u64,
+    ) -> Result<bool, BookApplyError> {
+        let idx = Self::price_index(price)?;
+        let slot = match side {
+            Side::Yes => &mut self.yes[idx],
+            Side::No => &mut self.no[idx],
+        };
+        let next = slot.saturating_add(size_delta);
+        let clamped = next < 0;
+        *slot = next.max(0);
+        self.seq = seq;
+        self.updated_at_ms = ts_ms;
+        Ok(clamped)
+    }
+
+    /// Yes bids, highest price first, skipping empty levels.
+    pub fn bids(&self) -> impl Iterator<Item = Level> + '_ {
+        (0..=100usize).rev().filter_map(|i| {
+            let size = self.yes[i];
+            (size > 0).then_some(Level {
+                price: i as Cents,
+                size,
+            })
+        })
+    }
+
+    /// Yes asks derived from no bids: price = 100 - no_price, ascending.
+    pub fn asks(&self) -> impl Iterator<Item = Level> + '_ {
+        (0..=100usize).rev().filter_map(|i| {
+            let size = self.no[i];
+            (size > 0).then_some(Level {
+                price: 100 - i as Cents,
+                size,
+            })
+        })
+    }
+
+    pub fn best_bid(&self) -> Option<Level> {
+        self.bids().next()
+    }
+
+    pub fn best_ask(&self) -> Option<Level> {
+        self.asks().next()
+    }
+
+    /// Best resting no bid (highest no price), if any.
+    pub fn best_no_bid(&self) -> Option<Level> {
+        (0..=100usize).rev().find_map(|i| {
+            let size = self.no[i];
+            (size > 0).then_some(Level {
+                price: i as Cents,
+                size,
+            })
+        })
+    }
+
+    /// True when best yes bid plus best no bid exceeds 100 cents (crossed book).
+    pub fn is_crossed(&self) -> bool {
+        match (self.best_bid(), self.best_no_bid()) {
+            (Some(yes), Some(no)) => yes.price + no.price > 100,
+            _ => false,
+        }
+    }
+
+    pub fn mark_resyncing(&mut self) {
+        self.state = BookState::Resyncing;
+    }
+
+    pub fn yes_size_at(&self, price: Cents) -> Option<i64> {
+        Some(self.yes[Self::price_index(price).ok()?])
+    }
+
+    pub fn no_size_at(&self, price: Cents) -> Option<i64> {
+        Some(self.no[Self::price_index(price).ok()?])
+    }
+
+    fn price_index(price: Cents) -> Result<usize, BookApplyError> {
+        if !(0..=100).contains(&price) {
+            return Err(BookApplyError::PriceOutOfRange(price));
+        }
+        Ok(price as usize)
+    }
+
+    fn set_level(arr: &mut [i64; 101], price: Cents, size: i64) -> Result<(), BookApplyError> {
+        if size < 0 {
+            return Err(BookApplyError::NegativeSnapshotSize(size));
+        }
+        let idx = Self::price_index(price)?;
+        // Multiple rows at the same price: last write wins; sizes should not
+        // accumulate from a snapshot (venue sends one row per price).
+        arr[idx] = size;
+        Ok(())
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BookApplyError {
+    PriceOutOfRange(Cents),
+    NegativeSnapshotSize(i64),
+}
+
+impl std::fmt::Display for BookApplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BookApplyError::PriceOutOfRange(p) => {
+                write!(f, "book price {p} outside 0..=100")
+            }
+            BookApplyError::NegativeSnapshotSize(s) => {
+                write!(f, "snapshot size {s} is negative")
+            }
+        }
+    }
+}
+
+impl std::error::Error for BookApplyError {}
 
 /// Which side of the book a resting order sits on, in the venue's own terms.
 ///
@@ -36,10 +227,10 @@ impl Book {
 ///
 /// The feed layer deliberately preserves whichever side the venue actually sent
 /// and performs no conversion. Translating `No` into a synthetic `Yes` price is
-/// book-construction work, and it belongs in the phase 2 book store where
-/// sequence gaps are detected and state is owned. Converting here would make the
-/// feed a silent participant in book state and would mean a translation bug and
-/// a venue bug look identical in the recorded corpus.
+/// book-construction work owned by the book store, where sequence gaps are
+/// detected and state is owned. Converting in the feed would make it a silent
+/// participant in book state and would mean a translation bug and a venue bug
+/// look identical in the recorded corpus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Yes,
@@ -280,8 +471,9 @@ impl Contracts {
 /// Floor fixed-point sizes to whole contracts without floats. Understating
 /// snapshot depth suppresses marginal signals instead of inventing liquidity.
 /// Signed changes use mathematical floor too: -1.20 becomes -2 (not -1).
-/// Repeated fractional deltas can accumulate conservative drift; phase 2 must
-/// resnapshot rather than assume floor(snapshot)+sum(floor(delta)) is exact.
+/// Repeated fractional deltas can accumulate conservative drift; the book store
+/// clamps levels at zero rather than assume floor(snapshot)+sum(floor(delta))
+/// is exact, and a fresh snapshot after resync restores absolute state.
 /// The counter measures x-floor(x) in hundredths, not unique lost book depth.
 /// Nonzero precision beyond hundredths is rejected rather than lost.
 pub fn parse_size_contracts(s: &str, discarded_hundredths: &mut u64) -> anyhow::Result<i64> {

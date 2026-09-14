@@ -264,6 +264,7 @@ pub fn backoff_ms(attempt: u32, jitter: u64) -> u64 {
 pub struct KalshiFeed {
     events: mpsc::Receiver<FeedEvent>,
     shutdown: watch::Sender<bool>,
+    resync: watch::Sender<u64>,
     worker: JoinHandle<Result<Metrics>>,
 }
 impl Feed for KalshiFeed {
@@ -281,11 +282,12 @@ impl KalshiFeed {
         let parser = Parser::new(&tickers)?;
         let (send, events) = mpsc::channel(256);
         let (shutdown, mut stop) = watch::channel(false);
+        let (resync_tx, resync_rx) = watch::channel(0u64);
         let worker = tokio::spawn(async move {
             let mut recorder = recorder;
             let mut parser = parser;
             let result = tokio::select! {
-                result = run(env, &credentials, &tickers, &mut recorder, &mut parser, send) => result,
+                result = run(env, &credentials, &tickers, &mut recorder, &mut parser, send, resync_rx) => result,
                 _ = stop.changed() => Ok(()),
             };
             recorder.flush()?;
@@ -296,9 +298,17 @@ impl KalshiFeed {
         Ok(Self {
             events,
             shutdown,
+            resync: resync_tx,
             worker,
         })
     }
+
+    /// Force a socket drop so the feed reconnects and receives a fresh snapshot.
+    pub fn request_resync(&self) {
+        let next = self.resync.borrow().saturating_add(1);
+        let _ = self.resync.send(next);
+    }
+
     pub async fn shutdown(self) -> Result<Metrics> {
         let _ = self.shutdown.send(true);
         self.worker.await?
@@ -312,6 +322,7 @@ async fn run(
     recorder: &mut Recorder,
     parser: &mut Parser,
     send: mpsc::Sender<FeedEvent>,
+    mut resync: watch::Receiver<u64>,
 ) -> Result<()> {
     let mut flush = tokio::time::interval(Duration::from_secs(2));
     let mut summary = tokio::time::interval_at(
@@ -357,11 +368,19 @@ async fn run(
         let mut acknowledged = false;
         let subscription_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
         let mut last_frame = tokio::time::Instant::now();
+        // Clear any pending resync notification from before this connection.
+        while resync.has_changed().unwrap_or(false) {
+            resync.borrow_and_update();
+        }
         loop {
             let frame = tokio::select! {
                 frame = socket.next() => frame,
                 _ = flush.tick() => { recorder.flush()?; continue; }
                 _ = summary.tick() => { parser.metrics.log(Venue::Kalshi); continue; }
+                _ = resync.changed() => {
+                    tracing::warn!("resync requested; dropping socket");
+                    break;
+                }
                 _ = tokio::time::sleep_until(subscription_deadline), if !acknowledged => {
                     tracing::warn!("subscription acknowledgement timed out"); break;
                 }

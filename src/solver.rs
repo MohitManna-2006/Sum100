@@ -14,7 +14,7 @@
 //! and display candidates that have already passed an integer go/no-go test.
 
 use crate::fees::FeeModel;
-use crate::types::{Book, Cents, Venue};
+use crate::types::{Book, Cents, ContractId, Venue};
 
 /// Result of consuming resting ask liquidity in a single book.
 ///
@@ -48,7 +48,7 @@ pub fn walk_asks(book: &Book, want: i64, fees: &dyn FeeModel) -> Walk {
     if want <= 0 {
         return walk;
     }
-    for level in &book.asks {
+    for level in book.asks() {
         let remaining = want - walk.filled;
         if remaining <= 0 {
             break;
@@ -74,7 +74,7 @@ pub struct Leg {
     /// Venue this leg executes on.
     pub venue: Venue,
     /// Venue-scoped contract identifier.
-    pub contract_id: u32,
+    pub contract_id: ContractId,
     /// Contracts bought on this leg.
     pub qty: i64,
     /// Premium paid on this leg.
@@ -198,17 +198,24 @@ pub fn scan_exhaustive_set(
 mod tests {
     use super::*;
     use crate::fees::KalshiFees;
-    use crate::types::Level;
+    use crate::types::{BookState, Level};
 
-    /// Single-level Kalshi book, fresh as of t=1000ms.
+    /// Single-level Kalshi book via a no-side bid at `100 - price` (yes ask).
     fn book(contract_id: u32, price: Cents, size: i64) -> Book {
-        Book {
-            venue: Venue::Kalshi,
-            contract_id,
-            asks: vec![Level { price, size }],
-            seq: 1,
-            updated_at_ms: 1000,
-        }
+        let mut b = Book::new(Venue::Kalshi, ContractId(contract_id));
+        b.apply_snapshot(
+            &[],
+            &[Level {
+                price: 100 - price,
+                size,
+            }],
+            1,
+            1000,
+        )
+        .unwrap();
+        assert_eq!(b.state, BookState::Live);
+        assert_eq!(b.best_ask().map(|l| (l.price, l.size)), Some((price, size)));
+        b
     }
 
     #[test]

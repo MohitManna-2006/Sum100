@@ -1,15 +1,15 @@
 # Sum100
 
-Real-time coherence and arbitrage engine for prediction markets, in Rust. Paper trading only. Stage 2 of phase 1 provides the Kalshi feed, public REST discovery, and raw recording. Book construction, complement conversion, replay scheduling, and solver integration come in later phases.
+Real-time coherence and arbitrage engine for prediction markets, in Rust. Paper trading only. Phase 2 provides the book store: live yes/no books with `100 - P` complement conversion, subscription-scoped sequence gap detection, forced-reconnect resync, and a `dump` command for visual verification. Replay scheduling and solver integration remain later phases.
 
 ## Design documents and scope
 
 [ARCHITECTURE.md](ARCHITECTURE.md) and [PLAN.md](PLAN.md) contain the imported design
-and phased roadmap, reconciled with the approved stage 2 decisions. The original
+and phased roadmap, reconciled with the approved stage 2 and phase 2 decisions. The original
 supplied README is preserved verbatim in [README.reference.md](README.reference.md).
 It uses the earlier name Parity and describes planned commands; this README is
 the source for current setup and supported behavior. The broader roadmap does
-not mean the book store, replay engine, registry, or frontend already exists.
+not mean the replay engine, registry, or frontend already exists.
 
 ## Setup
 
@@ -30,6 +30,10 @@ Demo is the default for every command. Production requires **`--prod`**, which l
 # Use a currently open demo ticker with demo credentials.
 cargo run --release -- record --venue kalshi --tickers YOUR-DEMO-TICKER
 
+# Live best bid/ask table (also records raw bytes under --out).
+cargo run --release -- dump --venue kalshi --prod \
+  --tickers KXBTCD-26SEP1417-T76999.99 --out data --seconds 70
+
 # Read-only production recording with a production key; graceful timed shutdown.
 cargo run --release -- record --venue kalshi --prod \
   --tickers KXBTCD-26SEP1417-T76999.99 --out data --seconds 70
@@ -47,11 +51,17 @@ Use `RUST_LOG=debug` to see normalized events and skipped types. The default is 
 
 `Feed::next` returns `FeedEvent` asynchronously and can be used through `dyn Feed`. A boxed future supplies that interface without adding `async-trait`. `ContractId` is an interned `u32`, with a separate venue/ticker lookup map.
 
-Snapshots carry **`yes` and `no` resting levels**, preserving venue prices; these names replace the originally proposed `bids`/`asks` to avoid implying that complement conversion has already happened. Deltas carry `Side::Yes` or `Side::No` and a signed `size_delta`. A no-side price stays unchanged in the feed. Phase 2 owns the `100 - P` conversion, book state, sequence-gap detection, and resynchronization. Sequence numbers are venue subscription sequence numbers; they can span multiple tickers and reset after a new subscription. Consumers must invalidate state on `Disconnected` and wait for a fresh snapshot after `Resubscribed`.
+Snapshots carry **`yes` and `no` resting levels**, preserving venue prices. Deltas carry `Side::Yes` or `Side::No` and a signed `size_delta`. The feed does not convert no prices; the book store owns the `100 - P` identity. Sequence numbers are venue subscription sequence numbers; they can span multiple tickers and reset after a new subscription. Consumers must invalidate state on `Disconnected` and wait for a fresh snapshot after `Resubscribed`.
 
-Prices go directly from decimal strings to integer cents; sub-cent precision and values outside 0–100 cents are errors. Size strings floor to whole contracts using integer arithmetic. Thus `491.90` becomes `491`, and signed `-1.20` becomes `-2`. Floor understates depth, but repeated fractional deltas can accumulate conservative drift: `floor(snapshot) + sum(floor(delta))` is not generally the same as flooring the resulting exact book. Phase 2 must account for this when resynchronizing. `discarded_size_hundredths` measures the sum of `x - floor(x)` in hundredths across successfully parsed messages, not unique missing depth. Nonzero precision beyond hundredths is rejected. Snapshot timestamps fall back to local receipt time when absent; deltas use venue milliseconds or their RFC3339 timestamp.
+Prices go directly from decimal strings to integer cents; sub-cent precision and values outside 0–100 cents are errors. Size strings floor to whole contracts using integer arithmetic. Thus `491.90` becomes `491`, and signed `-1.20` becomes `-2`. Floor understates depth, but repeated fractional deltas can accumulate conservative drift: `floor(snapshot) + sum(floor(delta))` is not generally the same as flooring the resulting exact book. The book store clamps a level at zero when floor drift would go negative, counts the clamp, and stays `Live` (understating depth is the safe direction). `discarded_size_hundredths` measures the sum of `x - floor(x)` in hundredths across successfully parsed messages, not unique missing depth. Nonzero precision beyond hundredths is rejected. Snapshot timestamps fall back to local receipt time when absent; deltas use venue milliseconds or their RFC3339 timestamp.
 
 Unknown types increment `unknown_messages` and `parse_attempts`, log at debug, and produce no event. Malformed known payloads increment `parse_errors`, log the raw payload at warn, and do not stop recording. Other metrics cover received messages, successful reconnects, uncompressed recorded bytes, discarded size, clock skew, and integer latency buckets. Reconnection uses exponential backoff from 250 ms to 30 s with positive jitter, resubscribes the complete ticker list, and emits `Resubscribed` only after the venue acknowledges the subscription. Feed consumers should continuously drain events; the channel is bounded.
+
+## Book store
+
+`BookStore` owns in-memory books. Each book keeps dense `[i64; 101]` size arrays for resting yes bids and no bids. Yes asks are derived as `price = 100 - no_price`. Snapshots are absolute and always applied; they set the book `Live` and rebase the subscription expected sequence. Deltas apply only when the book is `Live` and `seq` equals the expected subscription sequence. A gap marks every live book `Resyncing`, leaves level contents unchanged, and returns `Applied::Gap`. The driver (for example `dump`) calls `KalshiFeed::request_resync()`, which drops the socket so the existing reconnect path delivers a fresh snapshot. Sequence tracking is subscription-scoped for the single orderbook subscription the feed opens today; multiple concurrent `sid`s are not modeled yet.
+
+A crossed book (`best yes bid + best no bid > 100`) stays `Live` and increments `crossed_books_observed` — that condition is the complement arbitrage the later solver fast path will consume. Book metrics also cover snapshots applied, deltas applied, deltas skipped while not live, sequence gaps, resync requests, and negative-level clamps. `dump` prints a monospace best-bid/ask table to stdout on an interval (tracing stays on stderr) and records raw envelopes like `record`.
 
 ## Recording format
 
@@ -71,7 +81,9 @@ gzip -dc data/production/kalshi-2026-09-13.ndjson.gz | head
 
 ## Fixtures and verification
 
-`tests/fixtures/` contains verbatim original stage 1 captures, including the complete previously truncated snapshot, and a fresh stage 2 live orderbook session. See its README for provenance and hashes. Parser tests read files from disk. Recorder tests assert byte-identical raw read-back (after the single-LF rule), no blank lines, gzip member concatenation, sequence continuation on restart, and daily rotation. Signing tests generate a throwaway key and verify RSA-PSS signatures against its public key; random salt is not pinned.
+`tests/fixtures/` contains verbatim original stage 1 captures, including the complete previously truncated snapshot, and a fresh stage 2 live orderbook session. See its README for provenance and hashes. Parser tests read files from disk. Book-store tests replay the full stage 2 session to a pinned final best bid/ask, and cover complement conversion, gap/resync transitions, level lifecycle, floor-drift clamping, and crossed books. Recorder tests assert byte-identical raw read-back (after the single-LF rule), no blank lines, gzip member concatenation, sequence continuation on restart, and daily rotation. Signing tests generate a throwaway key and verify RSA-PSS signatures against its public key; random salt is not pinned.
+
+Live visual check: run `dump` beside the Kalshi web interface for an open ticker and confirm best prices match; any divergence should be preceded by a logged sequence gap and resync.
 
 ```sh
 cargo fmt --all -- --check
@@ -80,4 +92,4 @@ cargo test
 cargo build --release
 ```
 
-Implementation references: [WebSocket authentication and subscription](https://docs.kalshi.com/getting_started/quick_start_websockets), [RSA-PSS signing](https://docs.kalshi.com/getting_started/api_keys), [orderbook updates](https://docs.kalshi.com/websockets/orderbook-updates), [API environments](https://docs.kalshi.com/getting_started/api_environments), [event discovery](https://docs.kalshi.com/api-reference/events/get-events), and [market discovery](https://docs.kalshi.com/api-reference/market/get-markets), checked September 13, 2026. Reqwest's `query` feature enables proper cursor/ticker URL encoding; no new top-level dependencies were added in stage 2.
+Implementation references: [WebSocket authentication and subscription](https://docs.kalshi.com/getting_started/quick_start_websockets), [RSA-PSS signing](https://docs.kalshi.com/getting_started/api_keys), [orderbook updates](https://docs.kalshi.com/websockets/orderbook-updates), [API environments](https://docs.kalshi.com/getting_started/api_environments), [event discovery](https://docs.kalshi.com/api-reference/events/get-events), and [market discovery](https://docs.kalshi.com/api-reference/market/get-markets), checked September 13, 2026. Reqwest's `query` feature enables proper cursor/ticker URL encoding; no new top-level dependencies were added in phase 2.

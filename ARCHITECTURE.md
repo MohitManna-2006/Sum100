@@ -1,13 +1,13 @@
 # Sum100 Architecture
 
-Version 1.1 — reconciled with the approved phase 1 stage 2 scope on September 13, 2026.
-Status: target architecture; implementation is through phase 1 stage 2 only.
+Version 1.2 — reconciled with phase 2 (book store) on September 13, 2026.
+Status: target architecture; implementation is through phase 2 (book store).
 
 The imported design originally used the working name Parity. The repository and
 binary remain Sum100. The current runnable interface and verification evidence
 are in [README.md](README.md); [PLAN.md](PLAN.md) separates completed work from
-future milestones. Later examples in this document describe target components,
-not commands or APIs that already exist.
+future milestones. Later examples in this document (registry, replay, API,
+frontend) describe target components not yet present.
 
 ---
 
@@ -111,8 +111,9 @@ pub struct Level {
 pub struct Book {
     pub venue: Venue,
     pub contract_id: ContractId,
-    pub asks: Vec<Level>,        // ascending by price
-    pub bids: Vec<Level>,        // descending by price
+    // Dense size-by-price arrays (0..=100); asks() derives yes asks as 100 - no.
+    yes: [i64; 101],
+    no: [i64; 101],
     pub seq: u64,
     pub updated_at_ms: u64,
     pub state: BookState,
@@ -125,7 +126,7 @@ pub enum BookState {
 }
 ```
 
-`BookState` is load-bearing. The solver refuses to evaluate any group containing a book that is not `Live`. This single check eliminates the most dangerous class of false signal, which is trading on a book that silently diverged from the venue's true state.
+`BookState` is load-bearing. The solver refuses to evaluate any group containing a book that is not `Live`. This single check eliminates the most dangerous class of false signal, which is trading on a book that silently diverged from the venue's true state. Floor drift that would drive a level negative is clamped to zero and counted; a crossed book (`best yes bid + best no bid > 100`) stays `Live` and is counted for the complement fast path.
 
 ### 3.3 Registry types
 
@@ -188,8 +189,8 @@ pub enum FeedEvent {
 
 KalshiFeed implements this trait now. PolymarketFeed and ReplayFeed are planned.
 Snapshots preserve both resting outcome sides; deltas preserve wire yes/no and
-signed changes. Neither performs the no-price complement conversion or keeps a
-shadow book. Phase 2 owns book state and `100 - P`. Snapshot timestamps without a
+signed changes. The feed performs no no-price complement conversion. Phase 2's
+book store owns book state and `100 - P`. Snapshot timestamps without a
 venue timestamp use the recorded local receipt time.
 
 **KalshiFeed.** Holds a websocket connection to Kalshi's trade API. The order book delta channel is private and requires request signing with an RSA key, so the feed constructs headers containing a key id, a timestamp in milliseconds, and a signature over the concatenation of timestamp, method, and path. Every WebSocket handshake requires signing, including public ticker and trade channels. Demo and production require separate credentials; demo remains the default and production requires `--prod`. Kalshi sends a full snapshot on subscription and incremental deltas thereafter, each carrying a sequence number.
@@ -213,18 +214,18 @@ No signal is emitted from any book that has not received a post-reconnect snapsh
 
 ### 4.2 Book store
 
-The book store applies `FeedEvent` values to in-memory book state. It is the only component that mutates books.
+The book store applies `FeedEvent` values to in-memory book state. It is the only component that mutates books. It is implemented for Kalshi in `src/book.rs` and driven by the `dump` CLI.
 
 Its central responsibility is sequence continuity at the venue subscription scope. For Kalshi, sequence numbers can span multiple tickers on one subscription; per-contract checks alone would report false gaps. If a subscription receives sequence `n + 2` when it expected `n + 1`, the affected local books can no longer be trusted. The response is unconditional:
 
-1. Set `state = Resyncing`.
+1. Set `state = Resyncing` on every live book; leave level contents unchanged.
 2. Increment the `sequence_gaps` counter.
-3. Request a fresh snapshot for that contract.
-4. Reject all solver evaluation involving that contract until a snapshot arrives.
+3. Return `Applied::Gap` so the driver can call `KalshiFeed::request_resync()`, which drops the socket and reuses the existing reconnect / resubscribe path (Kalshi has no per-ticker snapshot request).
+4. Reject all delta application until a snapshot arrives and rebases the expected sequence.
 
-There is no attempt to repair or interpolate. The cost of a wrong book is a false signal that would lose money, and the cost of a brief blind spot is one missed opportunity out of thousands.
+Snapshots are absolute and always applied. There is no attempt to repair or interpolate. The cost of a wrong book is a false signal that would lose money, and the cost of a brief blind spot is one missed opportunity out of thousands. Sequence tracking is currently for the single orderbook subscription the feed opens; multiple concurrent `sid`s are not yet modeled.
 
-After applying an update, the book store marks every constraint group containing that contract as dirty and hands the dirty set to the solver.
+After applying an update, a future registry will mark every constraint group containing that contract as dirty and hand the dirty set to the solver. Dirty marking is not yet implemented.
 
 ### 4.3 Registry
 
