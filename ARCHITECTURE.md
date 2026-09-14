@@ -7,7 +7,10 @@ The imported design originally used the working name Parity. The repository and
 binary remain Sum100. The current runnable interface and verification evidence
 are in [README.md](README.md); [PLAN.md](PLAN.md) separates completed work from
 future milestones. Later examples in this document (registry, replay, API,
-frontend) describe target components not yet present.
+frontend) describe target components not yet present. Operator recipes live in
+the root `Makefile` and wrap `cargo run --release --`; they are not part of the
+engine and do not change clap flags, pin a ticker, or select production except
+on explicit `*-prod` targets.
 
 ---
 
@@ -168,6 +171,15 @@ pub struct ConstraintGroup {
 
 ## 4. Component design
 
+### 4.0 Operator interface
+
+The runnable binary is `sum100` (`src/main.rs`). Subcommands `record`, `dump`,
+`replay`, `probe`, and `markets` are clap; demo is the CLI default and production
+is `--prod` only. A root `Makefile` wraps `cargo run --release --` for the
+recipes in the README. It is sugar: same flags, no pinned ticker, production only
+on `*-prod` targets. `make help` lists knobs. The Makefile is not part of the
+engine; CI still invokes cargo directly.
+
 ### 4.1 Feed layer
 
 The feed layer exists to make everything downstream venue-agnostic. It is defined by one trait.
@@ -197,7 +209,7 @@ timestamp (Kalshi snapshots carry none, so it is `None` there); local receipt ti
 never fills it and comes from the injected clock instead. It is kept for clock-skew
 tracking and also survives in the raw recorded payloads.
 
-**KalshiFeed.** Holds a websocket connection to Kalshi's trade API. The order book delta channel is private and requires request signing with an RSA key, so the feed constructs headers containing a key id, a timestamp in milliseconds, and a signature over the concatenation of timestamp, method, and path. Every WebSocket handshake requires signing, including public ticker and trade channels. Demo and production require separate credentials; demo remains the default and production requires `--prod`. Kalshi sends a full snapshot on subscription and incremental deltas thereafter, each carrying a sequence number.
+**KalshiFeed.** Holds a websocket connection to Kalshi's trade API. The order book delta channel is private and requires request signing with an RSA key, so the feed constructs headers containing a key id, a timestamp in milliseconds, and a signature over the concatenation of timestamp, method, and path. Every WebSocket handshake requires signing, including public ticker and trade channels. Demo and production require separate credentials; demo remains the default and production requires `--prod` (Makefile `*-prod` targets). Kalshi sends a full snapshot on subscription and incremental deltas thereafter, each carrying a sequence number.
 
 **PolymarketFeed.** Polymarket exposes three separate APIs. Gamma provides public market discovery and metadata. The CLOB provides the live order book and requires wallet-based signing only for order placement, not for reading. A separate data API provides historical activity. Sum100 uses Gamma for discovery and the CLOB websocket for live books. Note that the CLOB migrated to a V2 contract in April 2026, changing a substantial portion of the order struct and the collateral token, so any older integration example should be treated as wrong.
 

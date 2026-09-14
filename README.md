@@ -26,30 +26,30 @@ Non-interactive zsh tooling reads `~/.zshenv` but does not read `~/.zshrc`. If t
 
 Demo is the default for every command. Production requires **`--prod`**, which logs a warning. Credentials are environment-specific: a production key cannot authenticate against demo. Every WebSocket connection requires authentication, including public channels. There are no order-placement, execution, or transfer endpoints in this program. REST discovery uses only public `GET /events` and `GET /markets` requests.
 
+The clap CLI in `src/main.rs` is the source of flags. A root `Makefile` wraps `cargo run --release --` for the recipes below. It does not pin a ticker and selects production only on `*-prod` targets. `make help` lists knobs (`TICKERS`, `SECONDS`, `FILE`, `DIGEST`, `EXTRA`, and others). `--out data` is already the CLI default.
+
 ```sh
 # Use a currently open demo ticker with demo credentials.
-cargo run --release -- record --venue kalshi --tickers YOUR-DEMO-TICKER
+make record TICKERS=YOUR-DEMO-TICKER
 
 # Live best bid/ask table (also records raw bytes under --out).
-cargo run --release -- dump --venue kalshi --prod \
-  --tickers KXBTCD-26SEP1417-T76999.99 --out data --seconds 70
+make dump-prod TICKERS=KXBTCD-26SEP1417-T76999.99 SECONDS=70
 
 # Read-only production recording with a production key; graceful timed shutdown.
-cargo run --release -- record --venue kalshi --prod \
-  --tickers KXBTCD-26SEP1417-T76999.99 --out data --seconds 70
+make record-prod TICKERS=KXBTCD-26SEP1417-T76999.99 SECONDS=70
 
 # Live dump that also writes its final state digest for replay verification.
-cargo run --release -- dump --venue kalshi --prod \
-  --tickers KXBTCD-26SEP1417-T76999.99 --out data --seconds 180 --digest-out live.digest
+make dump-digest TICKERS=KXBTCD-26SEP1417-T76999.99 SECONDS=180
 
 # Offline replay (no credentials, no network) verified against that live run.
-cargo run --release -- replay --venue kalshi \
-  --file data/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file live.digest
+make replay FILE=data/production/kalshi-2026-09-14.ndjson.gz
 
-# Multiple tickers are comma-separated. No --seconds means run until Ctrl-C.
-cargo run --release -- probe --prod --ticker KXBTCD-26SEP1417-T76999.99
-cargo run --release -- markets --prod --series KXBTCD
+# Multiple tickers are comma-separated. No SECONDS means run until Ctrl-C.
+make probe-prod TICKER=KXBTCD-26SEP1417-T76999.99
+make markets-prod SERIES=KXBTCD
 ```
+
+Those recipes are equivalent to `cargo run --release -- dump --venue kalshi --prod --tickers ...`. Pass through extra CLI flags with `EXTRA='--interval-ms 250'`. `FILE` defaults to today's UTC daily production recording if omitted.
 
 The dated ticker above is a capture example, not a permanent default. Discover a current market before later runs. `markets` follows event and market cursor pagination and prints one market per line. HTTP 429 and server errors receive up to five retries with backoff; `Retry-After` is honored up to a 30-second wait, with longer delays returned as an explicit error. `probe` prints ticker, trade, and orderbook payloads. The original `--bin probe` remains as the stage 1 diagnostic; use the `sum100 probe` subcommand for the supported CLI.
 
@@ -104,10 +104,8 @@ gzip -dc data/production/kalshi-2026-09-13.ndjson.gz | head
 Live visual check: run `dump` beside the Kalshi web interface for an open ticker and confirm best prices match; any divergence should be preceded by a logged sequence gap and resync.
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo build --release
+make check
+make build
 ```
 
 Implementation references: [WebSocket authentication and subscription](https://docs.kalshi.com/getting_started/quick_start_websockets), [RSA-PSS signing](https://docs.kalshi.com/getting_started/api_keys), [orderbook updates](https://docs.kalshi.com/websockets/orderbook-updates), [API environments](https://docs.kalshi.com/getting_started/api_environments), [event discovery](https://docs.kalshi.com/api-reference/events/get-events), and [market discovery](https://docs.kalshi.com/api-reference/market/get-markets), checked September 13, 2026. Reqwest's `query` feature enables proper cursor/ticker URL encoding; no new top-level dependencies were added in phase 2.
