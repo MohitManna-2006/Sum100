@@ -1,6 +1,7 @@
 # Sum100 Build Plan
 
-Planning horizon: 14 weeks from start.
+Planning horizon: 14 weeks from start, 16 if the coherence engine is built.
+The estimation path is specified in [docs/COHERENCE.md](docs/COHERENCE.md).
 
 ## Current checkpoint — September 13, 2026
 
@@ -34,8 +35,10 @@ unauthenticated public WebSocket, and parsed-event recorder assumptions.
   false-gap reconnect loop) and `venue_ts_ms` on `FeedEvent`; evidence in
   docs/phase-2-1-summary.md. Retroactive phase 2 summary in docs/phase-2-summary.md;
   its thirty-minute UI gate remains open.
+- Coherence engine: design accepted in [docs/COHERENCE.md](docs/COHERENCE.md);
+  implementation is phases 9 and 10, not started.
 - Pending: hour-long endurance session; thirty-minute UI side-by-side; registry/config;
-  extended solver properties; execution; second venue; UI.
+  extended solver properties; execution; second venue; coherence engine; UI.
 
 Use [README.md](README.md) for working commands and setup. The supplied original
 README is preserved verbatim as [README.reference.md](README.reference.md);
@@ -63,14 +66,14 @@ Everything else is upside.
 
 ### The minimum shippable state
 
-Phases 0 through 5 constitute a complete, defensible project. That is roughly four to five weeks. If the semester goes badly, stopping there produces something that still earns its place on a resume. Phases 6 onward increase the ceiling, not the floor.
+Phases 0 through 5 constitute a complete, defensible project. That is roughly four to five weeks. If the semester goes badly, stopping there produces something that still earns its place on a resume. Phases 6 onward increase the ceiling, not the floor. Phases 9 and 10 are the novel ceiling: a depth-weighted projection onto the registry's constraints, scored against resolved outcomes. They are not required for the floor.
 
 ### What deliberately stays out of scope
 
 - Real order placement. Not now, not later.
 - More than two venues.
 - Maker fee and queue position modeling.
-- Any machine learning component. There is no place in this system where a model would beat arithmetic, and adding one would be decoration.
+- Any machine learning component. There is no place in this system where a model would beat arithmetic, and adding one would be decoration. The coherence engine is a projection, not a model; it introduces no view.
 
 ---
 
@@ -252,18 +255,60 @@ Tasks:
 
 **Done when.** At least twenty pairs are verified, and replay over recorded data produces cross-venue candidates with a documented rejection breakdown.
 
-**This is the phase that differentiates the project.** It is also where the interesting interview material lives, because the resolution rules trap is the kind of problem that only appears when you actually build the thing.
+**This is the phase that differentiates the trading path.** It is also where the interesting interview material lives, because the resolution rules trap is the kind of problem that only appears when you actually build the thing. The estimation path, which is the novel ceiling, is phases 9 and 10.
 
 ---
 
-### Phase 9: Frontend
+### Phase 9: Coherence engine
 **Weeks 12 to 13**
+**Goal.** Publish the nearest internally consistent probabilities to the live books.
+
+Depends on phase 5 (registry, dirty marking). Cross-venue primitives additionally depend on phase 8 (verified pairs). Steps 1 through 3 can start against single-venue groups as soon as phase 5 lands. Full design: [docs/COHERENCE.md](docs/COHERENCE.md).
+
+Tasks:
+- Quote summarization with the `WeightModel` trait and all four quality cases (two-sided, one-sided, crossed, empty). No fabricated midpoints.
+- Weighted simplex projection onto exhaustive sets, with property tests.
+- Weighted isotonic regression (pool adjacent violators) onto monotone ladders, with property tests.
+- Cluster construction as connected components of the constraint graph, computed at registry load, with size logging and a hard cap.
+- Dykstra over clusters, with a 50-iteration cap, residual reporting, a single-group short circuit, and a shuffle-order property test.
+- Structural isolation from the solver: `src/coherence/` is not imported by `solver/`. No estimate reaches a go or no-go decision.
+
+**Deliverable.** On a recorded session, single-group events produce a coherent probability vector that sums to one (or is flagged incomplete), and overlapping groups produce an order-independent projection with a published residual.
+
+**Done when.** Property tests pass: constraints satisfied, idempotent, identity on already-feasible input, probabilities in `[0, 1]`, output independent of group order. Replay of a fixture session produces byte-identical estimates.
+
+**Why this is its own phase.** This is the first novel component. The trading path is a careful implementation of known detection. The estimation path is a data product. Mixing the two numeric domains is the failure the rest of the design exists to prevent.
+
+---
+
+### Phase 10: Coherence publication and calibration
+**Week 13**
+**Goal.** Make the estimate consumable, durable, and scored. The harness is built in the same stretch as the projector, not later.
+
+Tasks:
+- Publication types (`CoherentEstimate`, `EstimateStatus`), snapshot endpoints, and a ~10 Hz coalesced websocket delta stream.
+- Parquet storage partitioned by UTC day, written on change plus a short heartbeat, always on a status change. Persist the raw midpoint beside the coherent value.
+- `model_version` on every row from day one.
+- Calibration harness: Brier score and log loss for coherent versus raw midpoint, bucketed by time to resolution, scored only on `Coherent` rows, sliced by `model_version`.
+- First scored comparison over whatever events have resolved in the recorded corpus.
+
+**Deliverable.** A snapshot API, a history file, and a table that says whether coherent beat raw, by bucket.
+
+**Done when.** A replay writes the same Parquet bytes twice, and the harness produces a Brier and log-loss comparison without reconstructing history by hand.
+
+**Why this cannot wait.** Retrofitting storage means waiting weeks for new events to resolve. Either coherent beats raw, which is a publishable finding, or it does not, which tells you the weight model needs work. Both are real results. Neither exists without the history.
+
+---
+
+### Phase 11: Frontend
+**Weeks 14 to 15**
 **Goal.** Make the work visible in ten seconds.
 
 Tasks:
 - Add the `axum` API layer with a websocket state stream and a REST signal history endpoint.
 - Scaffold Vite, React, and TypeScript.
 - Build the coherence bar: a stacked bar of outcome prices against the 100 cent line, with the fee bar overlaid so the gap and the fee are visually comparable.
+- Display the coherent estimate and the `shift` beside the raw midpoint, including `EstimateStatus` so flagged numbers are visible as flagged.
 - Build the ladder monotonicity chart with violating segments highlighted.
 - Build the edge versus days-to-resolution scatter with constant annualized return curves.
 - Build the live signal table with leg breakdown.
@@ -274,12 +319,12 @@ Tasks:
 
 **Done when.** The README opens with a visual that communicates the project without reading a word.
 
-**Hard rule.** No business logic in the frontend. Every displayed number comes from the engine.
+**Hard rule.** No business logic in the frontend. Every displayed number comes from the engine. The coherent estimate is rendered, never recomputed.
 
 ---
 
-### Phase 10: Measurement and writeup
-**Week 14**
+### Phase 12: Measurement and writeup
+**Week 16**
 **Goal.** Convert the build into evidence.
 
 Tasks:
@@ -288,8 +333,9 @@ Tasks:
 - Record throughput in messages per second and constraint groups per second.
 - Record the full candidate to signal funnel with rejection reasons.
 - Record legging failure rate and simulated profit and loss.
+- Record coherent-versus-raw Brier and log loss by time-to-resolution bucket.
 - Fill in the README performance table with measured values.
-- Write the results section: what was found, what was rejected and why, and what the numbers say about whether this edge is real.
+- Write the results section: what was found, what was rejected and why, whether consistency improved forecasts, and what the numbers say about whether the trading edge is real.
 
 **Deliverable.** Every number in the README is measured and reproducible by the reader.
 
@@ -303,10 +349,11 @@ Tasks:
 | Polymarket V2 documentation gaps | High | Medium | Treat all pre-May-2026 examples as wrong, work from current docs, defer this venue to phase 7 so the project is already viable without it |
 | Fee model wrong in a way that is not obvious | Medium | High | Exhaustive fee table test in phase 0, read Polymarket rates from the live endpoint, never from documentation |
 | Scope creep into real trading | Medium | High | The executor is a simulator by architecture. There is no order placement code path to accidentally enable |
-| Frontend consumes disproportionate time | High | Medium | Scheduled last, deliberately. If time runs short, one static screenshot of the coherence bar is sufficient |
+| Frontend consumes disproportionate time | High | Medium | Scheduled after the coherence engine, deliberately. If time runs short, one static screenshot of the coherence bar is sufficient |
 | Discovering no real arbitrage exists | Medium | Low | This is a finding, not a failure. A rigorous measurement showing edges are consumed by fees is a more interesting result than a strategy that appears profitable |
-| Coursework crowds out the project | High | Medium | Phases 0 through 5 are the floor. Ship that, then reassess |
+| Coursework crowds out the project | High | Medium | Phases 0 through 5 are the floor. Ship that, then reassess. Coherence is ceiling; do not start it by starving the registry |
 | Venue changes its schema mid-build | Low | Medium | Parse failures log and skip rather than crash. The recorder captures raw payloads so any break is diagnosable after the fact |
+| Coherent estimate leaks into the solver | Medium | High | Structural: `solver/` cannot import `coherence/`. Review any PR that shares a quote type across the two paths |
 
 ---
 
@@ -326,6 +373,8 @@ These are the numbers that turn the project into resume lines. Collect them deli
 
 **Matching.** Candidate cross-venue pairs generated. Pairs verified. Pairs rejected on resolution rules mismatch. Precision against the hand-labeled set.
 
+**Coherence.** Events with a coherent estimate. Mean absolute shift. Clusters that hit the iteration cap. Brier score and log loss for coherent versus raw midpoint, by days-to-resolution bucket, sliced by `model_version`. This is the number that decides whether the estimation path is doing anything.
+
 ---
 
 ## 5. Interview preparation
@@ -342,8 +391,11 @@ Build the project, then be able to answer these without hesitating. Each maps to
 8. What the resolution rules trap is and why an automated matcher cannot be trusted alone.
 9. Why the system is a single process and how you would know when that stopped being true.
 10. What the rejection funnel actually showed, and what that says about whether this edge is real.
+11. Why the trading path and the estimation path are different numeric domains, and what goes wrong if a smoothed estimate is fed into a fee comparison.
+12. Why Dykstra rather than naive alternating projection, and why a published number that depends on registry file order is indefensible.
+13. Whether coherent estimates beat raw midpoints on Brier score and log loss, bucketed by time to resolution, and what that implies for the weight model.
 
-Question ten is the one that separates a project someone built from a project someone described.
+Question ten is the one that separates a project someone built from a project someone described. Question thirteen is the one that separates a coherence claim from a coherence finding.
 
 ---
 
@@ -356,8 +408,10 @@ If time runs short, cut in this order. Each cut leaves a coherent project behind
 3. Paper executor settlement simulation. Detection without a profit and loss curve is still a complete detection system.
 4. Polymarket entirely. Single-venue coherence scanning is a real project and the exhaustive and monotonicity violations are genuinely there.
 5. Frontend entirely. Replace with one terminal screenshot and a clear README.
+6. Coherence websocket delta stream. The snapshot endpoint plus Parquet is enough to score the study.
+7. Coherence engine entirely. Phases 0 through 5 remain a complete project. If you do build it, do not cut the calibration harness or the solver isolation; a projector without scores is an assertion, and an estimate that reaches the solver is a bug.
 
-Do not cut, under any circumstances: sequence gap handling, the freshness gate, the fee model, or the property tests. Those four are what separate this from a script that prints price differences.
+Do not cut, under any circumstances: sequence gap handling, the freshness gate, the fee model, or the property tests. Those four are what separate this from a script that prints price differences. If the coherence engine is in scope, also do not cut the calibration harness or the rule that estimation never feeds trading.
 
 ---
 

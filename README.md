@@ -5,7 +5,9 @@ Real-time coherence and arbitrage engine for prediction markets, in Rust. Paper 
 ## Design documents and scope
 
 [ARCHITECTURE.md](ARCHITECTURE.md) and [PLAN.md](PLAN.md) contain the imported design
-and phased roadmap, reconciled with the approved stage 2 and phase 2 decisions. The original
+and phased roadmap, reconciled with the approved stage 2 and phase 2 decisions. The
+estimation path is specified in [docs/COHERENCE.md](docs/COHERENCE.md); it is not
+implemented yet. The original
 supplied README is preserved verbatim in [README.reference.md](README.reference.md).
 It uses the earlier name Parity and describes planned commands; this README is
 the source for current setup and supported behavior. The broader roadmap does

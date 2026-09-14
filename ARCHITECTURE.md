@@ -6,11 +6,12 @@ Status: target architecture; implementation is through phase 2 (book store).
 The imported design originally used the working name Parity. The repository and
 binary remain Sum100. The current runnable interface and verification evidence
 are in [README.md](README.md); [PLAN.md](PLAN.md) separates completed work from
-future milestones. Later examples in this document (registry, replay, API,
-frontend) describe target components not yet present. Operator recipes live in
-the root `Makefile` and wrap `cargo run --release --`; they are not part of the
-engine and do not change clap flags, pin a ticker, or select production except
-on explicit `*-prod` targets.
+future milestones. The estimation path — a parallel consumer of the book store
+that never feeds the solver — is specified in [docs/COHERENCE.md](docs/COHERENCE.md).
+Later examples in this document (registry, replay, API, frontend) describe target
+components not yet present. Operator recipes live in the root `Makefile` and wrap
+`cargo run --release --`; they are not part of the engine and do not change clap
+flags, pin a ticker, or select production except on explicit `*-prod` targets.
 
 ---
 
@@ -41,7 +42,7 @@ Sum100 watches prediction market order books and detects when the prices of logi
 ### Explicit non-goals
 
 - Placing real orders. The executor is a simulator by design, not by omission.
-- Predicting event outcomes. Sum100 has no view on whether the Fed cuts rates.
+- Predicting event outcomes. Sum100 has no view on whether the Fed cuts rates. The coherence engine is a minimum-distance correction of the market's own numbers, not a forecast; see [docs/COHERENCE.md](docs/COHERENCE.md).
 - Supporting more than two venues initially. The feed trait makes adding a third cheap, but breadth before depth would be a mistake.
 - Horizontal scaling. One process comfortably handles the entire universe of contracts on both venues. Distributing it would add failure modes and buy nothing.
 
@@ -513,7 +514,7 @@ Metrics collected continuously and exposed both on the health endpoint and in th
 
 **Decision.** In-process bounded channels.
 
-**Reasoning.** The entire contract universe across both venues is in the low thousands. Peak message rate is well within what a single core can parse. A broker would add a network hop, a serialization round trip, an operational dependency, and a new failure mode, in exchange for a scaling headroom the system will never approach. The correct engineering answer to a capacity question is to measure first, and the current single-process design is the starting point; throughput and latency claims require the phase 10 benchmarks.
+**Reasoning.** The entire contract universe across both venues is in the low thousands. Peak message rate is well within what a single core can parse. A broker would add a network hop, a serialization round trip, an operational dependency, and a new failure mode, in exchange for a scaling headroom the system will never approach. The correct engineering answer to a capacity question is to measure first, and the current single-process design is the starting point; throughput and latency claims require the phase 12 benchmarks.
 
 **Consequences.** Restarting the process loses in-flight state, which is acceptable because books resynchronize from snapshots within seconds. Scaling beyond one process would require real work, which is the right trade when that day is unlikely to arrive.
 
