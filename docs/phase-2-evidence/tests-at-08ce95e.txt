@@ -1,0 +1,61 @@
+# cargo test --all at 08ce95ef7d1e4630a91e296f8f70b5118e12baf0 (detached worktree), run 2026-09-14 with rustc 1.98.1
+
+running 12 tests
+test solver::tests::stale_leg_is_rejected ... ok
+test solver::tests::five_cent_gap_survives_fees ... ok
+test types::tests::malformed_and_empty_input_is_rejected ... ok
+test fees::tests::kalshi_taker_fee_matches_published_schedule ... ok
+test solver::tests::two_cent_gap_is_eaten_by_fees ... ok
+test types::tests::out_of_range_prices_are_rejected ... ok
+test types::tests::parses_boundaries_and_short_forms ... ok
+test types::tests::no_float_rounding_artifacts_across_the_whole_tick_ladder ... ok
+test types::tests::side_is_a_faithful_echo_of_the_wire ... ok
+test types::tests::parses_real_venue_prices_exactly ... ok
+test types::tests::sub_cent_precision_is_rejected_not_rounded ... ok
+test fees::ladder_tests::every_tick_is_the_smallest_cent_covering_the_exact_fee ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 9 tests
+test floor_drift_clamps_at_zero ... ok
+test disconnect_invalidates_and_resubscribe_awaits_snapshot ... ok
+test level_insert_update_and_remove ... ok
+test deltas_dropped_while_resyncing_until_snapshot ... ok
+test parser_and_bookstore_agree_on_contract_ids ... ok
+test crossed_book_stays_live_and_is_counted ... ok
+test sequence_gap_marks_resyncing_and_preserves_contents ... ok
+test no_side_delta_becomes_yes_ask_at_complement ... ok
+test full_fixture_replay_reaches_pinned_final_book ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 8 tests
+test interning_is_stable_and_venue_scoped_and_backoff_is_bounded ... ok
+test fixed_point_sizes_floor_with_exact_discard_counter ... ok
+test unknown_types_skip_and_malformed_frames_do_not_stop_parser ... ok
+test captured_snapshot_and_every_consecutive_delta_parse ... ok
+test fresh_live_session_and_real_no_side_price_are_preserved ... ok
+test recorder_rejects_concurrent_writer_and_corrupt_append ... ok
+test recorder_round_trip_keeps_raw_bytes_without_blank_records ... ok
+test rsa_pss_signature_verifies_documented_message_and_rejects_tampering ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.64s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+phase2 test exit=0

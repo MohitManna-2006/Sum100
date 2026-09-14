@@ -1,0 +1,19 @@
+# Which session D book hashes changed between 712eb42 (before) and 0f04b3e (after), and why.
+# Source: before.digest.gz / after.digest.gz in this directory; data/phase3-d/production/kalshi-2026-09-14.ndjson.gz
+
+book hashes changed: 55 of 80; gap log hash changed (a853803b... -> be853c97...)
+
+52 changed books were one-sided in at least one snapshot. Before: their one-sided snapshots were rejected, so the
+   book kept an older state or never went live. After: every snapshot applies.
+ 3 changed books were always two-sided: T77249.99, T77999.99, T78249.99. D's final connection (records 21171..21258)
+   carried exactly 4 deltas, all on these books (1, 2, 1). Before: the first delta raised the false gap
+   (expected=61 got=81) and all were skipped. After: all 4 apply. Every other book had no deltas in that connection.
+ 2 unchanged books were one-sided in some snapshots: T80749.99, T80999.99. Their final snapshot was two-sided and they
+   had no deltas in the final connection, so both runs end with identical state.
+25 other books unchanged: always two-sided and no final-connection deltas.
+
+Gap log: before 227 gap + 227 disconnected + 18,080 resubscribed + 6,477 resynced entries;
+         after    0 gap + 227 disconnected + 18,080 resubscribed + 18,080 resynced entries.
+The 227 disconnected and 18,080 resubscribed entries come from control envelopes the live run recorded. Replay
+reproduces that transport history; the fix removes the gaps that caused it.
+Final state is Resyncing for all 80 books in both runs because the recording ends with a recorded disconnect.

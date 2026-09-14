@@ -1,0 +1,91 @@
+# $ RUST_LOG=debug sum100 replay --venue kalshi --file data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz (book update lines) vs raw envelopes in the same file
+book events on FeedEvent: 14460 | book payloads in file: 14460
+kinds match in order: True
+FeedEvent venue_ts_ms == raw msg.ts_ms for every event: True
+snapshots: venue_ts_ms None: 80 of 80
+deltas: 14380 | venue_ts_ms equal to received_at_ms: 0 | received - venue ms min/p50/max: 3419 3426 5982
+sample raw delta envelope (truncated): {"received_at_ms": 1789359206151, "sequence": 83, "kind": "text", "raw": "{\"type\":\"orderbook_delta\",\"sid\":1,\"seq\":81,\"msg\":{\"market_ticker\":\"KXBTCD-26SEP1417-T74499.99\",\"market_id\":\"3ea4d53d-dd9d-4f53-86f7-5d9b3af48a49\",\"price_dollars\":\"0.9700\",\"delta_fp\":\"-400.00\",\"side\":\"yes\",\"ts\":\"2026-09-14T0
+
+one-sided books at snapshot: 53 (yes/-: 31 -/no: 22 )
+one-sided books with >=1 delta applied: 53 | deltas applied to one-sided books: 1094 | all deltas applied: 14380
+ticker                       sides     deltas
+KXBTCD-26SEP1417-T66499.99   yes/-          2
+KXBTCD-26SEP1417-T66749.99   yes/-          2
+KXBTCD-26SEP1417-T66999.99   yes/-          2
+KXBTCD-26SEP1417-T67249.99   yes/-          2
+KXBTCD-26SEP1417-T67499.99   yes/-          4
+KXBTCD-26SEP1417-T67749.99   yes/-          2
+KXBTCD-26SEP1417-T67999.99   yes/-          2
+KXBTCD-26SEP1417-T68249.99   yes/-          2
+KXBTCD-26SEP1417-T68499.99   yes/-          3
+KXBTCD-26SEP1417-T68749.99   yes/-          3
+KXBTCD-26SEP1417-T68999.99   yes/-          2
+KXBTCD-26SEP1417-T69249.99   yes/-          2
+KXBTCD-26SEP1417-T69499.99   yes/-          2
+KXBTCD-26SEP1417-T69749.99   yes/-          6
+KXBTCD-26SEP1417-T69999.99   yes/-          2
+KXBTCD-26SEP1417-T70249.99   yes/-          2
+KXBTCD-26SEP1417-T70499.99   yes/-          2
+KXBTCD-26SEP1417-T70749.99   yes/-          2
+KXBTCD-26SEP1417-T70999.99   yes/-          2
+KXBTCD-26SEP1417-T71249.99   yes/-          2
+KXBTCD-26SEP1417-T71499.99   yes/-          2
+KXBTCD-26SEP1417-T71749.99   yes/-          2
+KXBTCD-26SEP1417-T71999.99   yes/-          4
+KXBTCD-26SEP1417-T72249.99   yes/-          4
+KXBTCD-26SEP1417-T72499.99   yes/-          2
+KXBTCD-26SEP1417-T72749.99   yes/-          2
+KXBTCD-26SEP1417-T72999.99   yes/-          2
+KXBTCD-26SEP1417-T73249.99   yes/-          6
+KXBTCD-26SEP1417-T73499.99   yes/-         86
+KXBTCD-26SEP1417-T73749.99   yes/-        463
+KXBTCD-26SEP1417-T73999.99   yes/-         90
+KXBTCD-26SEP1417-T74249.99   yes/no       326
+KXBTCD-26SEP1417-T74499.99   yes/no       194
+KXBTCD-26SEP1417-T74749.99   yes/no       361
+KXBTCD-26SEP1417-T74999.99   yes/no       194
+KXBTCD-26SEP1417-T75249.99   yes/no       216
+KXBTCD-26SEP1417-T75499.99   yes/no       369
+KXBTCD-26SEP1417-T75749.99   yes/no       303
+KXBTCD-26SEP1417-T75999.99   yes/no       598
+KXBTCD-26SEP1417-T76249.99   yes/no       557
+KXBTCD-26SEP1417-T76499.99   yes/no       682
+KXBTCD-26SEP1417-T76749.99   yes/no       665
+KXBTCD-26SEP1417-T76999.99   yes/no       947
+KXBTCD-26SEP1417-T77249.99   yes/no      1042
+KXBTCD-26SEP1417-T77499.99   yes/no       666
+KXBTCD-26SEP1417-T77749.99   yes/no       823
+KXBTCD-26SEP1417-T77999.99   yes/no       659
+KXBTCD-26SEP1417-T78249.99   yes/no       755
+KXBTCD-26SEP1417-T78499.99   yes/no       536
+KXBTCD-26SEP1417-T78749.99   yes/no       428
+KXBTCD-26SEP1417-T78999.99   yes/no       504
+KXBTCD-26SEP1417-T79249.99   yes/no       414
+KXBTCD-26SEP1417-T79499.99   yes/no       343
+KXBTCD-26SEP1417-T79749.99   yes/no       321
+KXBTCD-26SEP1417-T79999.99   yes/no       248
+KXBTCD-26SEP1417-T80249.99   yes/no       458
+KXBTCD-26SEP1417-T80499.99   yes/no       305
+KXBTCD-26SEP1417-T80749.99   yes/no       372
+KXBTCD-26SEP1417-T80999.99   -/no          87
+KXBTCD-26SEP1417-T81249.99   -/no         135
+KXBTCD-26SEP1417-T81499.99   -/no          67
+KXBTCD-26SEP1417-T81749.99   -/no          42
+KXBTCD-26SEP1417-T81999.99   -/no           4
+KXBTCD-26SEP1417-T82249.99   -/no           2
+KXBTCD-26SEP1417-T82499.99   -/no           6
+KXBTCD-26SEP1417-T82749.99   -/no           2
+KXBTCD-26SEP1417-T82999.99   -/no           2
+KXBTCD-26SEP1417-T83249.99   -/no           2
+KXBTCD-26SEP1417-T83499.99   -/no           2
+KXBTCD-26SEP1417-T83749.99   -/no           3
+KXBTCD-26SEP1417-T83999.99   -/no           4
+KXBTCD-26SEP1417-T84249.99   -/no           3
+KXBTCD-26SEP1417-T84499.99   -/no           4
+KXBTCD-26SEP1417-T84749.99   -/no           2
+KXBTCD-26SEP1417-T84999.99   -/no           2
+KXBTCD-26SEP1417-T85249.99   -/no           2
+KXBTCD-26SEP1417-T85499.99   -/no           2
+KXBTCD-26SEP1417-T85749.99   -/no           6
+KXBTCD-26SEP1417-T85999.99   -/no           2
+KXBTCD-26SEP1417-T86249.99   -/no           2

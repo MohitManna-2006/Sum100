@@ -1,0 +1,183 @@
+$ shasum -a 256 data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz
+0edf5a850b0f1c4742d7ae34320a4025371ce5064d8b361facc8b19c537e55b7  data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz
+
+$ gzip -dc data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz | grep -o '"kind":"[a-z_0-9]*"' | sort | uniq -c
+   1 "kind":"control"
+14461 "kind":"text"
+
+$ gzip -dc data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz | grep '"kind":"control"' | grep -o 'event[^,]*' | sort | uniq -c
+   1 event\":\"session_started
+
+$ sandbox-exec -p '(version 1)(allow default)(deny network*)' env -i NO_COLOR=1 ./target/release/sum100 replay --venue kalshi --file data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file docs/phase-2-1-evidence/session-e/live.digest --digest-out docs/phase-2-1-evidence/session-e/replay-max.digest
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T66499.99       live               5443      99x7922            -            -       1x7922   113448
+KXBTCD-26SEP1417-T66749.99       live               5444      99x7922            -            -       1x7922   113448
+KXBTCD-26SEP1417-T66999.99       live               5482      99x7922            -            -       1x7922   113425
+KXBTCD-26SEP1417-T67249.99       live               5484      99x7922            -            -       1x7922   113425
+KXBTCD-26SEP1417-T67499.99       live               6589      99x7922            -            -       1x7922   106483
+KXBTCD-26SEP1417-T67749.99       live               5486      99x2822            -            -       1x2822   113423
+KXBTCD-26SEP1417-T67999.99       live               5487      99x2822            -            -       1x2822   113423
+KXBTCD-26SEP1417-T68249.99       live               5490      99x2822            -            -       1x2822   113423
+KXBTCD-26SEP1417-T68499.99       live              14322      99x2822            -            -       1x2822     1151
+KXBTCD-26SEP1417-T68749.99       live              14458      99x2822            -            -       1x2822        0
+KXBTCD-26SEP1417-T68999.99       live               5498      99x2822            -            -       1x2822   113418
+KXBTCD-26SEP1417-T69249.99       live               5495      98x5845            -            -       2x5845   113420
+KXBTCD-26SEP1417-T69499.99       live               5493      98x5845            -            -       2x5845   113420
+KXBTCD-26SEP1417-T69749.99       live               7594      98x5845            -            -       2x5845    90517
+KXBTCD-26SEP1417-T69999.99       live               5499      98x5845            -            -       2x5845   113418
+KXBTCD-26SEP1417-T70249.99       live               5503      98x5845            -            -       2x5845   113417
+KXBTCD-26SEP1417-T70499.99       live               5504      98x5845            -            -       2x5845   113415
+KXBTCD-26SEP1417-T70749.99       live               5508      98x5525            -            -       2x5525   113414
+KXBTCD-26SEP1417-T70999.99       live               5510      98x5525            -            -       2x5525   113407
+KXBTCD-26SEP1417-T71249.99       live               5513      98x5525            -            -       2x5525   113406
+KXBTCD-26SEP1417-T71499.99       live               5556      98x5285            -            -       2x5285   113383
+KXBTCD-26SEP1417-T71749.99       live               5562      98x5285            -            -       2x5285   113379
+KXBTCD-26SEP1417-T71999.99       live               5557      98x5123            -            -       2x5123   113381
+KXBTCD-26SEP1417-T72249.99       live               5558      98x5110            -            -       2x5110   113379
+KXBTCD-26SEP1417-T72499.99       live               5560      98x5073            -            -       2x5073   113379
+KXBTCD-26SEP1417-T72749.99       live               5564      98x5090            -            -       2x5090   113379
+KXBTCD-26SEP1417-T72999.99       live               5568      98x4980            -            -       2x4980   113375
+KXBTCD-26SEP1417-T73249.99       live               8658      98x5020            -            -       2x5020    75183
+KXBTCD-26SEP1417-T73499.99       live              14389      98x5405            -            -       2x5405      342
+KXBTCD-26SEP1417-T73749.99       live              14395       98x416            -            -        2x416      341
+KXBTCD-26SEP1417-T73999.99       live              14393      97x5375            -            -       3x5375      341
+KXBTCD-26SEP1417-T74249.99       live              14452      97x8383      99x3400       1x3400       3x8383      162
+KXBTCD-26SEP1417-T74499.99       live              14408      97x8568      98x5874       2x5874       3x8568      193
+KXBTCD-26SEP1417-T74749.99       live              14435      96x8575       98x430        2x430       4x8575      193
+KXBTCD-26SEP1417-T74999.99       live              14436        96x33      97x4159       3x4159         4x33      193
+KXBTCD-26SEP1417-T75249.99       live              14418      94x3616      96x5889       4x5889       6x3616      193
+KXBTCD-26SEP1417-T75499.99       live              14433       92x474      94x3631       6x3631        8x474      193
+KXBTCD-26SEP1417-T75749.99       live              14437      91x3204      92x3590       8x3590       9x3204      193
+KXBTCD-26SEP1417-T75999.99       live              14425       87x407      89x5731      11x5731       13x407      193
+KXBTCD-26SEP1417-T76249.99       live              14426        84x53      85x5891      15x5891        16x53      193
+KXBTCD-26SEP1417-T76499.99       live              14455       79x102      80x5785      20x5785       21x102        0
+KXBTCD-26SEP1417-T76749.99       live              14440       73x109      74x5945      26x5945       27x109      183
+KXBTCD-26SEP1417-T76999.99       live              14445       65x405      67x6958      33x6958       35x405      183
+KXBTCD-26SEP1417-T77249.99       live              14456      57x3706      59x3918      41x3918      43x3706        0
+KXBTCD-26SEP1417-T77499.99       live              14443      49x4845      51x3820      49x3820      51x4845      183
+KXBTCD-26SEP1417-T77749.99       live              14417      41x5673      43x3482      57x3482      59x5673      193
+KXBTCD-26SEP1417-T77999.99       live              14420      34x5895      36x8005      64x8005      66x5895      193
+KXBTCD-26SEP1417-T78249.99       live              14448      27x5862         28x4         72x4      73x5862      183
+KXBTCD-26SEP1417-T78499.99       live              14416      21x5901      23x9005      77x9005      79x5901      193
+KXBTCD-26SEP1417-T78749.99       live              14442      16x5838      18x8128      82x8128      84x5838      183
+KXBTCD-26SEP1417-T78999.99       live              14441      12x5430      13x2699      87x2699      88x5430      183
+KXBTCD-26SEP1417-T79249.99       live              14457       8x5883        9x153       91x153      92x5883        0
+KXBTCD-26SEP1417-T79499.99       live              14438       6x3956       8x8323      92x8323      94x3956      183
+KXBTCD-26SEP1417-T79749.99       live              14439       4x3827       6x3470      94x3470      96x3827      183
+KXBTCD-26SEP1417-T79999.99       live              14460       3x3995       5x8217      95x8217      97x3995        0
+KXBTCD-26SEP1417-T80249.99       live              14446        2x400          3x6         97x6       98x400      183
+KXBTCD-26SEP1417-T80499.99       live              14386       1x3269       4x8003      96x8003      99x3269      369
+KXBTCD-26SEP1417-T80749.99       live              14454            -       3x5006      97x5006            -        0
+KXBTCD-26SEP1417-T80999.99       live              14374            -       3x5002      97x5002            -      370
+KXBTCD-26SEP1417-T81249.99       live              14376            -          2x7         98x7            -      369
+KXBTCD-26SEP1417-T81499.99       live              14380            -          2x7         98x7            -      369
+KXBTCD-26SEP1417-T81749.99       live              14382            -       2x4968      98x4968            -      369
+KXBTCD-26SEP1417-T81999.99       live               5897            -          1x5         99x5            -   112437
+KXBTCD-26SEP1417-T82249.99       live               5659            -       2x5000      98x5000            -   113314
+KXBTCD-26SEP1417-T82499.99       live              12786            -        1x120       99x120            -    14524
+KXBTCD-26SEP1417-T82749.99       live               5662            -        1x360       99x360            -   113312
+KXBTCD-26SEP1417-T82999.99       live               5663            -        1x440       99x440            -   113312
+KXBTCD-26SEP1417-T83249.99       live               5664            -        1x460       99x460            -   113310
+KXBTCD-26SEP1417-T83499.99       live               5665            -        1x700       99x700            -   113310
+KXBTCD-26SEP1417-T83749.99       live               5666            -        1x700       99x700            -   113310
+KXBTCD-26SEP1417-T83999.99       live               5667            -        1x700       99x700            -   113308
+KXBTCD-26SEP1417-T84249.99       live               5670            -        1x700       99x700            -   113308
+KXBTCD-26SEP1417-T84499.99       live               5673            -        1x700       99x700            -   113305
+KXBTCD-26SEP1417-T84749.99       live               5674            -       1x2922      99x2922            -   113304
+KXBTCD-26SEP1417-T84999.99       live               5676            -       1x2922      99x2922            -   113302
+KXBTCD-26SEP1417-T85249.99       live               5679            -       1x2922      99x2922            -   113297
+KXBTCD-26SEP1417-T85499.99       live               5680            -       1x2922      99x2922            -   113295
+KXBTCD-26SEP1417-T85749.99       live              13110            -       1x2922      99x2922            -    12712
+KXBTCD-26SEP1417-T85999.99       live               5682            -       1x3022      99x3022            -   113295
+KXBTCD-26SEP1417-T86249.99       live               5683            -       1x3022      99x3022            -   113295
+
+INFO sum100::book: book store metrics self=BookMetrics { snapshots_applied: 80, deltas_applied: 14380, deltas_skipped_not_live: 0, sequence_gaps: 0, resync_requests: 0, negative_level_clamps: 4, crossed_books_observed: 0 } uninitialized=0 resyncing=0 live=80
+INFO sum100: replay finished metrics=Metrics { messages_received: 14461, parse_errors: 0, parse_attempts: 14461, unknown_messages: 0, reconnections: 0, bytes_recorded: 0, discarded_size_hundredths: 6658, snapshot_sides_absent: 53, latency_buckets: [0, 0, 0, 0, 0, 0, 14380], clock_skew_samples: 0 }
+# sum100 state digest v1 (timestamps excluded)
+book KXBTCD-26SEP1417-T66499.99 b4e7eb9bafd98305e5b6bafbff8de4c7f95aa6a602923c0a9c8855892604e34b
+book KXBTCD-26SEP1417-T66749.99 b834597494195e8edeb2f4f6f50ee9e582c73bd94639cd63092a4256def12712
+book KXBTCD-26SEP1417-T66999.99 8f2baddf8877887ffacee04a9927adb9fcda3458f672594b061d56cee118fe4d
+book KXBTCD-26SEP1417-T67249.99 a0a6fd31db8574a63ed193f4f68265855f5aed0232879ed8392671a5e22f230b
+book KXBTCD-26SEP1417-T67499.99 eff2f7215866d6427174fed55be47755b7ae92d671447e075e936bfeb0df3986
+book KXBTCD-26SEP1417-T67749.99 032e7fc5d3c4c76d13648686cc151a8daaf4c798af9d0c98ee5706a2dc5c7cad
+book KXBTCD-26SEP1417-T67999.99 719452ec25a852baf98f844a48cde1c95bc15127100679250f833c10c48a5977
+book KXBTCD-26SEP1417-T68249.99 9fda2957f457147aa5680d9d6a3908614fa0ac41f81cfe97e0fbc0a32808f144
+book KXBTCD-26SEP1417-T68499.99 94816c3e4316c227c08af320ad166195fe4d0efe7e42106d14f41779761b4d04
+book KXBTCD-26SEP1417-T68749.99 d9f15295eef45b2fda1235fd96626face25690c53aee2ded605c66c73be46ccf
+book KXBTCD-26SEP1417-T68999.99 23fc16a6ddaa19dfc3fd80e9a50fd2d0949dcc3e74f8c2ba37517df038b12519
+book KXBTCD-26SEP1417-T69249.99 b7acef0125f972ae74dfb9ed9ee5869c89cfcd6eaea3720a0482393a62780863
+book KXBTCD-26SEP1417-T69499.99 0ce5019c5955dc431e57406cd8f83a1b486677e1aed3bae2fee45f81d7f35527
+book KXBTCD-26SEP1417-T69749.99 f294ceb7b849efaa92a0685a26f9dfe908090ae541b03bc1e929fa68139a4806
+book KXBTCD-26SEP1417-T69999.99 e9d694bf39c1a0b52ce213975cf9d73657e3f19543769ef64c816fab9bf4a74d
+book KXBTCD-26SEP1417-T70249.99 760ee6468566e4d534bfed6ec3bee33d3c083f6ac2caedd1fc75d83be40fa408
+book KXBTCD-26SEP1417-T70499.99 b23098737f58eeb0e8ac9329b7293556d9be5046445ced4f20238ec7f2e0ab62
+book KXBTCD-26SEP1417-T70749.99 04772c8d69b0219995fe1f046217472258355427f790aef15e67c1fce3aa4f3c
+book KXBTCD-26SEP1417-T70999.99 01fbce0c39d231622516d49eab56bed7a000e6479ab591bd329b13d627839e15
+book KXBTCD-26SEP1417-T71249.99 f6e1955d8fb6fc3e04e6beb017ca035abb4c5e8f3d2ef6eebec395372fa0ba5a
+book KXBTCD-26SEP1417-T71499.99 6bb57c9f5d3c2e7b7d97d0a40279eb0e4bfe3646987a7b622366fee0b0befef2
+book KXBTCD-26SEP1417-T71749.99 571d1e6b9fa3460f37786c0e644e398afa39bab8e419212cd8467b0f347392cf
+book KXBTCD-26SEP1417-T71999.99 296dec6daa95df34e9e64dc5050722c368ff6a9dbef07f15f43f639136b72609
+book KXBTCD-26SEP1417-T72249.99 4aa9ca2640733d4313c552c103b633591580dd825ac1373b98dde86ddfe61b57
+book KXBTCD-26SEP1417-T72499.99 08db39f2c1e67de447658208d9a46deb46a3f0b111408f4cc2b3e93bfbf7e079
+book KXBTCD-26SEP1417-T72749.99 6c9eef9df545c959e1d48fd37c7cca974ccc10d9c64cb58cf55c9fccc90ad333
+book KXBTCD-26SEP1417-T72999.99 25c86b3de1da3b71f0ed1d79416b05d73c560a67004c8e1a3241586af982c095
+book KXBTCD-26SEP1417-T73249.99 b5fe9a275af3e3eba3824d3e1fa600fd25aebe03146863d45080fb95792519a8
+book KXBTCD-26SEP1417-T73499.99 4db8dc03325db93c5904e8a30d26273f9f4985bf455258a8c1f06cd278644c27
+book KXBTCD-26SEP1417-T73749.99 593df76d39b579454665f539b74c25eadc818c31822dd48fcf3dc7eaf4bff5d9
+book KXBTCD-26SEP1417-T73999.99 74a0c574fdf29143a5e98616453fc379d673447f05813f1e65b3eb8c8536acbd
+book KXBTCD-26SEP1417-T74249.99 6aaebaa06ea6aabff12bca9861758481e70b7007730156844b192c1fdac493cd
+book KXBTCD-26SEP1417-T74499.99 9c8faa3198373a1bd626fe6d21585c67efc3dd0b3ebcf524f17f685875174df2
+book KXBTCD-26SEP1417-T74749.99 bf1b98e198cedbd28a42e6a605789b48a257838fbc212ba9ce6a43ad1b4b3eec
+book KXBTCD-26SEP1417-T74999.99 553565a088844cbae14b5e53f9a8696e2889277a175ab0a8aaf2b3e40750ae0c
+book KXBTCD-26SEP1417-T75249.99 9d22be15cad58430f44c31d00d81129a907c386b223d4a2ae4f9d882fe3af8ec
+book KXBTCD-26SEP1417-T75499.99 78641d6dae6939af91c6a0505c9ad78f54c1991266f1f398542aaa8db828af9a
+book KXBTCD-26SEP1417-T75749.99 df3d940e6a181b6fe13fa148c5bb395fd55c92294740c2175806a91f528a8095
+book KXBTCD-26SEP1417-T75999.99 7ed60227cf60373deda620658c8a1251be73624f80f6eea68fd80624a0ad4625
+book KXBTCD-26SEP1417-T76249.99 498a04a737a5afbd6b4c85099d0765b665bf7103859028fc8efa83d43aff405a
+book KXBTCD-26SEP1417-T76499.99 1dd88c9e9be5038475d335c5ee0c604197ec1dbc4b6e7009779f36f193f0a113
+book KXBTCD-26SEP1417-T76749.99 165c157281ef555aacd6ec650afae22f4945b5a77c05f82a1d54fa60d0c6ec63
+book KXBTCD-26SEP1417-T76999.99 3223acb603c3f0c1b3b9a07412a23e4649a885d6316efac2370381dede31894a
+book KXBTCD-26SEP1417-T77249.99 e3303052a60f4ff4a4b46348d533b504a8cd25075a204972af8cc50492074829
+book KXBTCD-26SEP1417-T77499.99 2b5dd6179138bb6461cf58022d7f6145cf775d4bd4934f09f7664de49642d4db
+book KXBTCD-26SEP1417-T77749.99 3b4d2f97badd5aba1c5ba447c0f718e6b320c22f525cd0c83fbbfd0931d5190a
+book KXBTCD-26SEP1417-T77999.99 237f2058367dfaa313a3192a195d6f439cd33b3cc8498ecebd83d544332abc48
+book KXBTCD-26SEP1417-T78249.99 09e7835b5a7f87223732e42b3f3562270fd8d604a8fbc224a22e554a6dda7d12
+book KXBTCD-26SEP1417-T78499.99 61fc0072693e0ba457668534689e7568f7b4b4aef92be780bd417f0fbcf29ee9
+book KXBTCD-26SEP1417-T78749.99 55af52e4e09e4f8620625cdbc0172924f2d30cc3cd029f3820ee843f1ed8a7a6
+book KXBTCD-26SEP1417-T78999.99 9062d873f3a986748162be2a91d8378543e8e002fd93438b89cbd3b806bf27da
+book KXBTCD-26SEP1417-T79249.99 cbee0203db7295514c4dab38790e7c05fe69f3b4219e793c5c4564fa34530255
+book KXBTCD-26SEP1417-T79499.99 c7d62ca626b7d1b6c3030e9cf3d41d0605fa14cca44740249e35119c038eafb2
+book KXBTCD-26SEP1417-T79749.99 d76705903eb81855f45389a368eb733a028459ad2f26331f5ed36fa8b2647eda
+book KXBTCD-26SEP1417-T79999.99 583189a6dd1f0f00af7c25f8280137fc4cad6a6bcbb1527f699ba176562f950f
+book KXBTCD-26SEP1417-T80249.99 66e472b79e3d0d31e97a460df8ceb3a29379e5e0ddd5d29ae9c0527cedb61f85
+book KXBTCD-26SEP1417-T80499.99 d0897e7a73d7dfac73de19bf61855577e150cbc295b69908224bfcf06ae1f9e3
+book KXBTCD-26SEP1417-T80749.99 869fc2d29d80d06a408e11144a1ca72823a47cd0f58d7d6a9c4189477861671d
+book KXBTCD-26SEP1417-T80999.99 899c34424db7877423406deffc4972ea2fa62e6622ca76619c6810a23d1c608c
+book KXBTCD-26SEP1417-T81249.99 dfb03f982b25e141716543d9e8b6f1499f51d43b0a010783d4a6a71352afaf53
+book KXBTCD-26SEP1417-T81499.99 a034cb57b64cf14580423385a891d71e329397e8786212f660b5931f3ffa5a97
+book KXBTCD-26SEP1417-T81749.99 06d4d7cbdaa9a835561a68d4785a069349067bb5e90592cb3edb57a52265e473
+book KXBTCD-26SEP1417-T81999.99 71953e13aeda9ac052a497dec51d13ed155528499360a2d87ea0eb536e2cc6b8
+book KXBTCD-26SEP1417-T82249.99 ecdfd8d7552437ccc6f81e5616addf098111f1500ce7f03ee1094c3128eaa03f
+book KXBTCD-26SEP1417-T82499.99 1eb0f9b267bf0487e5b07d68e8b2c5387548eed7c78dfb03156e3eb1f2456c07
+book KXBTCD-26SEP1417-T82749.99 23376015cdef5f0b5d5bfd17a40f349f83495a6546181d3e853620e54d434f8f
+book KXBTCD-26SEP1417-T82999.99 e9676ef1438062f18065e9f525c967142147b8d60c83f7da8b523a2689f9380a
+book KXBTCD-26SEP1417-T83249.99 159020362487561b02dcb7aa3b3e1312433fa4d0721fc27f61ae05599c5f0cf0
+book KXBTCD-26SEP1417-T83499.99 177bc4fc3b99be6c4cb0ce6447e421714397b32ff31c7cbfa148815c955b8013
+book KXBTCD-26SEP1417-T83749.99 a34651baed6a17757741b7f21a5630633e1c6118bfc232ecec16ef79032ec940
+book KXBTCD-26SEP1417-T83999.99 fde03a892244aa82e25dfea57a80e651c6bbe0c34eb3f8f6432d142040b15d44
+book KXBTCD-26SEP1417-T84249.99 e77d28c62b29ec0f077806730f37414d82b8ce690a9797bb8d384599229317f0
+book KXBTCD-26SEP1417-T84499.99 7f6dc4d9d57df0d6cc305a87e6629187820821ef6d762a0ef6e64749a87608da
+book KXBTCD-26SEP1417-T84749.99 ff9d92182104e73d8ed939554dd7ad39405aaf867738a4a2431d98121cf40bc2
+book KXBTCD-26SEP1417-T84999.99 73dab033529212a3ca7aa24e8525a5b3c3acee3fda2e8530bb5d5b167f2f0bf1
+book KXBTCD-26SEP1417-T85249.99 22f036cd4abea9ed0d053783fadd295fdb01f92fe71807598300d7e0a27fc75b
+book KXBTCD-26SEP1417-T85499.99 14d52d6fd304ed5d5ed2cb81671c32efeed259ba7020119d4afadb7766cd37ee
+book KXBTCD-26SEP1417-T85749.99 6e0c35bba797d6b5aabfa3f69975ca9d8adf98500ce27ea08cffae17ad827c3f
+book KXBTCD-26SEP1417-T85999.99 82c4bc3e20821f33b1c1f686f788fb687ee123c847444f93478282dc4922bf10
+book KXBTCD-26SEP1417-T86249.99 290bc855f7806249995266e87d45c474fd9bea22c6c7a141625e6cd428e4d0af
+gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+metrics events=14460 snapshots_applied=80 deltas_applied=14380 deltas_skipped_not_live=0 sequence_gaps=0 resync_requests=0 negative_level_clamps=4 crossed_books_observed=0
+verify OK: 80 book hash(es) and gap log hash match
+exit=0
+
+$ diff docs/phase-2-1-evidence/session-e/live.digest docs/phase-2-1-evidence/session-e/replay-max.digest && echo IDENTICAL
+IDENTICAL

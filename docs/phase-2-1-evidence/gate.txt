@@ -1,0 +1,81 @@
+# 2026-09-14T04:17:30Z rustc 1.98.1 at HEAD 0f04b3e; src/ and tests/ clean: 0 changed paths
+$ cargo fmt --all -- --check
+exit=0
+
+$ cargo clippy --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
+exit=0
+
+$ cargo test --all
+     Running unittests src/lib.rs (target/debug/deps/sum100-f9a0ca07b179d83f)
+test fees::tests::kalshi_taker_fee_matches_published_schedule ... ok
+test clock::tests::wall_clock_reads_epoch_milliseconds ... ok
+test clock::tests::replay_clock_is_shared_and_monotonic ... ok
+test solver::tests::stale_leg_is_rejected ... ok
+test solver::tests::five_cent_gap_survives_fees ... ok
+test types::tests::malformed_and_empty_input_is_rejected ... ok
+test solver::tests::two_cent_gap_is_eaten_by_fees ... ok
+test types::tests::out_of_range_prices_are_rejected ... ok
+test types::tests::parses_boundaries_and_short_forms ... ok
+test types::tests::parses_real_venue_prices_exactly ... ok
+test fees::ladder_tests::every_tick_is_the_smallest_cent_covering_the_exact_fee ... ok
+test types::tests::side_is_a_faithful_echo_of_the_wire ... ok
+test types::tests::sub_cent_precision_is_rejected_not_rounded ... ok
+test types::tests::no_float_rounding_artifacts_across_the_whole_tick_ladder ... ok
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/probe.rs (target/debug/deps/probe-a99e1584fe502aaf)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/sum100-f91d3e3d95002d24)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/book.rs (target/debug/deps/book-086118e387bb206a)
+test parser_and_bookstore_agree_on_contract_ids ... ok
+test deltas_dropped_while_resyncing_until_snapshot ... ok
+test floor_drift_clamps_at_zero ... ok
+test crossed_book_stays_live_and_is_counted ... ok
+test disconnect_invalidates_and_resubscribe_awaits_snapshot ... ok
+test level_insert_update_and_remove ... ok
+test sequence_gap_marks_resyncing_and_preserves_contents ... ok
+test no_side_delta_becomes_yes_ask_at_complement ... ok
+test full_fixture_replay_reaches_pinned_final_book ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/replay.rs (target/debug/deps/replay-d3236a1be37118c8)
+test no_wall_clock_reads_outside_clock_module ... ok
+test control_kind_is_the_tag_and_old_envelopes_still_parse ... ok
+test sessions_in_one_daily_file_are_separated ... ok
+test legacy_file_replays_through_live_parse_path_to_pinned_book ... ok
+test control_envelopes_reproduce_live_gap_and_resync_path ... ok
+test recorded_disconnect_session_replays_to_live_digest ... ok
+test digest_is_repeatable_and_excludes_timestamps ... ok
+test venue_timestamps_survive_recording_and_replay_separately_from_receipt ... ok
+test realtime_pace_sleeps_recorded_gaps_and_max_does_not ... ok
+test cli_replay_verifies_with_no_credentials_in_environment ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.25s
+     Running tests/snapshot_sides.rs (target/debug/deps/snapshot_sides-fd94a05bed8b22d8)
+test absent_side_clears_stale_levels_and_null_is_not_counted_absent ... ok
+test malformed_snapshots_are_still_rejected_and_counted ... ok
+test one_sided_snapshots_from_session_d_stay_live_without_false_gaps ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+     Running tests/stage2.rs (target/debug/deps/stage2-9a9f13a0d776355e)
+test interning_is_stable_and_venue_scoped_and_backoff_is_bounded ... ok
+test fixed_point_sizes_floor_with_exact_discard_counter ... ok
+test unknown_types_skip_and_malformed_frames_do_not_stop_parser ... ok
+test captured_snapshot_and_every_consecutive_delta_parse ... ok
+test fresh_live_session_and_real_no_side_price_are_preserved ... ok
+test recorder_rejects_concurrent_writer_and_corrupt_append ... ok
+test recorder_round_trip_keeps_raw_bytes_without_blank_records ... ok
+test rsa_pss_signature_verifies_documented_message_and_rejects_tampering ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.83s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+exit=0
+
+$ cargo build --release
+    Finished `release` profile [optimized] target(s) in 0.23s
+exit=0
+
+$ git diff --stat 712eb42 0f04b3e -- Cargo.toml Cargo.lock   # dependency check
+(empty = unchanged)
+
+$ grep -rn "Utc::now\|Local::now\|SystemTime\|UNIX_EPOCH" src --include=*.rs
+src/clock.rs:10:    time::{SystemTime, UNIX_EPOCH},
+src/clock.rs:23:        SystemTime::now()
+src/clock.rs:24:            .duration_since(UNIX_EPOCH)

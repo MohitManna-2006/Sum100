@@ -30,7 +30,11 @@ unauthenticated public WebSocket, and parsed-event recorder assumptions.
   operator verification step via `dump`.
 - Phase 3: injected `Clock`, recorder control envelopes, `ReplayFeed`, pacing,
   and `replay --verify`; evidence in docs/phase-3-summary.md.
-- Pending: hour-long endurance session; registry/config;
+- Phase 2.1: one-sided Kalshi snapshots applied as empty sides (removes the
+  false-gap reconnect loop) and `venue_ts_ms` on `FeedEvent`; evidence in
+  docs/phase-2-1-summary.md. Retroactive phase 2 summary in docs/phase-2-summary.md;
+  its thirty-minute UI gate remains open.
+- Pending: hour-long endurance session; thirty-minute UI side-by-side; registry/config;
   extended solver properties; execution; second venue; UI.
 
 Use [README.md](README.md) for working commands and setup. The supplied original
