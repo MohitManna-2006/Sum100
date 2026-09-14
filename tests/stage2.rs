@@ -53,12 +53,14 @@ fn captured_snapshot_and_every_consecutive_delta_parse() {
                 yes,
                 no,
                 seq: s,
-                ts_ms,
+                venue_ts_ms,
             }) => {
                 assert_eq!(contract, ContractId(0));
                 assert_eq!(s, 1);
                 seq = s;
-                assert_eq!(ts_ms, 1234);
+                // The snapshot carries no venue time; receipt time (1234) must not
+                // be substituted into the venue field.
+                assert_eq!(venue_ts_ms, None);
                 assert_eq!((yes.len(), no.len()), (40, 48));
                 assert_eq!((yes[0].price, yes[0].size), (1, 236781));
                 assert_eq!(parser.metrics.discarded_size_hundredths, 479);
@@ -69,13 +71,13 @@ fn captured_snapshot_and_every_consecutive_delta_parse() {
                 price,
                 size_delta,
                 seq: s,
-                ts_ms,
+                venue_ts_ms,
             }) => {
                 assert_eq!(contract, ContractId(0));
                 assert_eq!(s, seq + 1);
                 seq = s;
                 let wire: serde_json::Value = serde_json::from_str(&raw).unwrap();
-                assert_eq!(ts_ms, wire["msg"]["ts_ms"].as_u64().unwrap());
+                assert_eq!(venue_ts_ms, wire["msg"]["ts_ms"].as_u64().unwrap());
                 assert_eq!(
                     price,
                     sum100::types::parse_price_cents(
@@ -85,7 +87,7 @@ fn captured_snapshot_and_every_consecutive_delta_parse() {
                 );
                 if s == 2 {
                     assert_eq!(
-                        (side, price, size_delta, ts_ms),
+                        (side, price, size_delta, venue_ts_ms),
                         (Side::Yes, 34, -100, 1789342115869)
                     );
                 }
@@ -296,7 +298,7 @@ fn fresh_live_session_and_real_no_side_price_are_preserved() {
             price: 55,
             size_delta: -1000,
             seq: 4,
-            ts_ms: 1789343119239,
+            venue_ts_ms: 1789343119239,
         })
     );
     assert!(fixture("stage2-live-orderbook.ndjson").contains(&no_frame[0]));

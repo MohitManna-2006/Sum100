@@ -114,7 +114,7 @@ fn no_side_delta_becomes_yes_ask_at_complement() {
             price: 55,
             size_delta: -1000,
             seq: 4,
-            ts_ms: 1789343119239,
+            venue_ts_ms: 1789343119239,
         })
     );
 }
@@ -168,7 +168,7 @@ fn deltas_dropped_while_resyncing_until_snapshot() {
                 size: 20
             }],
             seq: 1,
-            ts_ms: 1000,
+            venue_ts_ms: None,
         }),
         Applied::Snapshot(id)
     );
@@ -179,7 +179,7 @@ fn deltas_dropped_while_resyncing_until_snapshot() {
             price: 40,
             size_delta: 5,
             seq: 2,
-            ts_ms: 1001,
+            venue_ts_ms: 1001,
         }),
         Applied::Delta(id)
     );
@@ -190,7 +190,7 @@ fn deltas_dropped_while_resyncing_until_snapshot() {
             price: 40,
             size_delta: 1,
             seq: 4,
-            ts_ms: 1002,
+            venue_ts_ms: 1002,
         }),
         Applied::Gap {
             expected: 3,
@@ -204,7 +204,7 @@ fn deltas_dropped_while_resyncing_until_snapshot() {
             price: 40,
             size_delta: 99,
             seq: 5,
-            ts_ms: 1003,
+            venue_ts_ms: 1003,
         }),
         Applied::Skipped
     );
@@ -217,7 +217,7 @@ fn deltas_dropped_while_resyncing_until_snapshot() {
             yes: vec![Level { price: 41, size: 7 }],
             no: vec![],
             seq: 10,
-            ts_ms: 2000,
+            venue_ts_ms: None,
         }),
         Applied::Snapshot(id)
     );
@@ -239,7 +239,7 @@ fn disconnect_invalidates_and_resubscribe_awaits_snapshot() {
         yes: vec![Level { price: 30, size: 5 }],
         no: vec![],
         seq: 1,
-        ts_ms: 1,
+        venue_ts_ms: None,
     });
     assert_eq!(
         store.apply(&FeedEvent::Disconnected {
@@ -261,7 +261,7 @@ fn disconnect_invalidates_and_resubscribe_awaits_snapshot() {
             price: 30,
             size_delta: 1,
             seq: 1,
-            ts_ms: 2,
+            venue_ts_ms: 2,
         }),
         Applied::Skipped
     );
@@ -270,7 +270,7 @@ fn disconnect_invalidates_and_resubscribe_awaits_snapshot() {
         yes: vec![Level { price: 31, size: 9 }],
         no: vec![],
         seq: 1,
-        ts_ms: 3,
+        venue_ts_ms: None,
     });
     assert_eq!(store.get(id).unwrap().state, BookState::Live);
     assert_eq!(store.get(id).unwrap().yes_size_at(31), Some(9));
@@ -286,7 +286,7 @@ fn level_insert_update_and_remove() {
         yes: vec![],
         no: vec![],
         seq: 1,
-        ts_ms: 1,
+        venue_ts_ms: None,
     });
     // Insert 0 -> n
     store.apply(&FeedEvent::Delta {
@@ -295,7 +295,7 @@ fn level_insert_update_and_remove() {
         price: 25,
         size_delta: 100,
         seq: 2,
-        ts_ms: 2,
+        venue_ts_ms: 2,
     });
     assert_eq!(store.get(id).unwrap().yes_size_at(25), Some(100));
     assert!(
@@ -312,7 +312,7 @@ fn level_insert_update_and_remove() {
         price: 25,
         size_delta: 50,
         seq: 3,
-        ts_ms: 3,
+        venue_ts_ms: 3,
     });
     assert_eq!(store.get(id).unwrap().yes_size_at(25), Some(150));
     // Remove n -> 0
@@ -322,7 +322,7 @@ fn level_insert_update_and_remove() {
         price: 25,
         size_delta: -150,
         seq: 4,
-        ts_ms: 4,
+        venue_ts_ms: 4,
     });
     assert_eq!(store.get(id).unwrap().yes_size_at(25), Some(0));
     assert!(!store.get(id).unwrap().bids().any(|l| l.price == 25));
@@ -339,7 +339,7 @@ fn floor_drift_clamps_at_zero() {
         yes: vec![Level { price: 10, size: 0 }],
         no: vec![],
         seq: 1,
-        ts_ms: 1,
+        venue_ts_ms: None,
     });
     assert_eq!(
         store.apply(&FeedEvent::Delta {
@@ -348,7 +348,7 @@ fn floor_drift_clamps_at_zero() {
             price: 10,
             size_delta: -1,
             seq: 2,
-            ts_ms: 2,
+            venue_ts_ms: 2,
         }),
         Applied::Delta(id)
     );
@@ -373,7 +373,7 @@ fn crossed_book_stays_live_and_is_counted() {
             size: 10,
         }],
         seq: 1,
-        ts_ms: 1,
+        venue_ts_ms: None,
     });
     let book = store.get(id).unwrap();
     assert!(book.is_crossed());

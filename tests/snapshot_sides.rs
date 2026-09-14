@@ -215,7 +215,7 @@ fn absent_side_clears_stale_levels_and_null_is_not_counted_absent() {
             size: 40,
         }],
         seq: 1,
-        ts_ms: 0,
+        venue_ts_ms: None,
     };
     store.apply(&stale);
     assert_eq!(store.get(contract).unwrap().no_size_at(95), Some(40));

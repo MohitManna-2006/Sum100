@@ -118,7 +118,7 @@ impl BookStore {
                 yes,
                 no,
                 seq,
-                ts_ms: _,
+                venue_ts_ms: _,
             } => self.apply_snapshot(*contract, yes, no, *seq, self.clock.now_ms()),
             FeedEvent::Delta {
                 contract,
@@ -126,7 +126,7 @@ impl BookStore {
                 price,
                 size_delta,
                 seq,
-                ts_ms: _,
+                venue_ts_ms: _,
             } => self.apply_delta(
                 *contract,
                 *side,

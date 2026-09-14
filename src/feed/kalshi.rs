@@ -237,12 +237,12 @@ impl Parser {
                     yes: levels(m.yes_dollars_fp)?,
                     no: levels(m.no_dollars_fp)?,
                     seq: e.seq.context("snapshot missing seq")?,
-                    ts_ms: m.ts_ms.unwrap_or(receipt),
+                    venue_ts_ms: m.ts_ms,
                 }
             }
             "orderbook_delta" => {
                 let m: Delta = serde_json::from_value(e.msg)?;
-                let ts_ms = match m.ts_ms {
+                let venue_ts_ms = match m.ts_ms {
                     Some(ts) => ts,
                     None => u64::try_from(
                         chrono::DateTime::parse_from_rfc3339(
@@ -264,7 +264,7 @@ impl Parser {
                     price: parse_price_cents(&m.price_dollars)?,
                     size_delta: parse_size_contracts(&m.delta_fp, &mut discarded)?,
                     seq: e.seq.context("delta missing seq")?,
-                    ts_ms,
+                    venue_ts_ms,
                 }
             }
             "subscribed" | "unsubscribed" => return Ok(None),
@@ -280,8 +280,8 @@ impl Parser {
             .discarded_size_hundredths
             .saturating_add(discarded);
         self.metrics.snapshot_sides_absent += absent_sides;
-        if let FeedEvent::Delta { ts_ms, .. } = event {
-            self.metrics.observe_latency(receipt, ts_ms);
+        if let FeedEvent::Delta { venue_ts_ms, .. } = event {
+            self.metrics.observe_latency(receipt, venue_ts_ms);
         }
         Ok(Some(event))
     }

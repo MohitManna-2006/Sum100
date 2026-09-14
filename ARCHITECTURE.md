@@ -180,8 +180,8 @@ pub trait Feed: Send {
 }
 
 pub enum FeedEvent {
-    Snapshot { contract: ContractId, yes: Vec<Level>, no: Vec<Level>, seq: u64, ts_ms: u64 },
-    Delta    { contract: ContractId, side: Side, price: Cents, size_delta: i64, seq: u64, ts_ms: u64 },
+    Snapshot { contract: ContractId, yes: Vec<Level>, no: Vec<Level>, seq: u64, venue_ts_ms: Option<u64> },
+    Delta    { contract: ContractId, side: Side, price: Cents, size_delta: i64, seq: u64, venue_ts_ms: u64 },
     Disconnected { venue: Venue },
     Resubscribed { contract: ContractId },
 }
@@ -192,8 +192,10 @@ Snapshots preserve both resting outcome sides; a side whose key Kalshi omits
 (far strikes) is an empty side, while both keys absent remains a schema error.
 Deltas preserve wire yes/no and
 signed changes. The feed performs no no-price complement conversion. Phase 2's
-book store owns book state and `100 - P`. Snapshot timestamps without a
-venue timestamp use the recorded local receipt time.
+book store owns book state and `100 - P`. `venue_ts_ms` is only the venue's own
+timestamp (Kalshi snapshots carry none, so it is `None` there); local receipt time
+never fills it and comes from the injected clock instead. It is kept for clock-skew
+tracking and also survives in the raw recorded payloads.
 
 **KalshiFeed.** Holds a websocket connection to Kalshi's trade API. The order book delta channel is private and requires request signing with an RSA key, so the feed constructs headers containing a key id, a timestamp in milliseconds, and a signature over the concatenation of timestamp, method, and path. Every WebSocket handshake requires signing, including public ticker and trade channels. Demo and production require separate credentials; demo remains the default and production requires `--prod`. Kalshi sends a full snapshot on subscription and incremental deltas thereafter, each carrying a sequence number.
 

@@ -154,14 +154,14 @@ async fn legacy_file_replays_through_live_parse_path_to_pinned_book() {
     assert!(run.gaps.entries().is_empty());
 
     // Clock followed receipt time, and books were stamped with it rather than
-    // with the venue ts_ms carried on the delta.
+    // with the venue timestamp carried on the delta.
     let last_receipt = BASE_MS + 150 * (frames.len() as u64 - 1);
     assert_eq!(run.clock_ms, last_receipt);
     assert_eq!(book.updated_at_ms, last_receipt);
-    let FeedEvent::Delta { ts_ms, .. } = run.events.last().unwrap() else {
+    let FeedEvent::Delta { venue_ts_ms, .. } = run.events.last().unwrap() else {
         panic!("last event should be a delta");
     };
-    assert_ne!(*ts_ms, last_receipt);
+    assert_ne!(*venue_ts_ms, last_receipt);
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -443,6 +443,92 @@ async fn recorded_disconnect_session_replays_to_live_digest() {
             .iter()
             .all(|book| book.state == BookState::Live)
     );
+}
+
+/// The venue's own timestamp survives recording and replay unchanged and stays
+/// separate from local receipt time; phase 7 skew tracking needs both.
+#[tokio::test]
+async fn venue_timestamps_survive_recording_and_replay_separately_from_receipt() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/phase3-disconnect-session.ndjson.gz");
+    // Expected per book event, read straight from the recorded raw bytes.
+    let mut expected = Vec::new();
+    for record in read_records(&path).unwrap() {
+        let record = record.unwrap();
+        if record.kind != "text" {
+            continue;
+        }
+        let wire: serde_json::Value = serde_json::from_str(&record.raw).unwrap();
+        match wire["type"].as_str() {
+            Some("orderbook_snapshot") => {
+                expected.push((wire["msg"]["ts_ms"].as_u64(), record.received_at_ms))
+            }
+            Some("orderbook_delta") => {
+                let ts_ms = wire["msg"]["ts_ms"].as_u64().unwrap();
+                let rfc3339 =
+                    chrono::DateTime::parse_from_rfc3339(wire["msg"]["ts"].as_str().unwrap())
+                        .unwrap();
+                assert_eq!(rfc3339.timestamp_millis() as u64, ts_ms);
+                expected.push((Some(ts_ms), record.received_at_ms));
+            }
+            _ => {}
+        }
+    }
+    let run = replay(&path, max(None)).await;
+    let actual: Vec<Option<u64>> = run
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            FeedEvent::Snapshot { venue_ts_ms, .. } => Some(*venue_ts_ms),
+            FeedEvent::Delta { venue_ts_ms, .. } => Some(Some(*venue_ts_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(actual.len(), 2_280);
+    assert_eq!(
+        actual,
+        expected.iter().map(|(venue, _)| *venue).collect::<Vec<_>>()
+    );
+    // Kalshi snapshots carry no venue time; receipt time is not substituted.
+    assert_eq!(actual.iter().filter(|venue| venue.is_none()).count(), 8);
+    // Every delta's venue time differs from its receipt time (about 3.4 s here).
+    assert!(
+        expected
+            .iter()
+            .all(|(venue, receipt)| *venue != Some(*receipt))
+    );
+    // Books are stamped with receipt time, not venue time.
+    let (last_venue, last_receipt) = *expected.last().unwrap();
+    let stamped: Vec<u64> = run.store.books().iter().map(|b| b.updated_at_ms).collect();
+    assert!(stamped.contains(&last_receipt));
+    assert!(!stamped.contains(&last_venue.unwrap()));
+
+    // Deliberate mutations: a delta with only the RFC3339 `ts`, and a snapshot
+    // that does carry `ts_ms`, keep their venue values.
+    let ticker = "KXBTCD-26SEP1417-T76999.99".to_owned();
+    let mut parser = Parser::new(std::slice::from_ref(&ticker)).unwrap();
+    let delta = read_records(&path)
+        .unwrap()
+        .map(Result::unwrap)
+        .map(|r| serde_json::from_str::<serde_json::Value>(&r.raw).unwrap_or_default())
+        .find(|v| v["type"] == "orderbook_delta" && v["msg"]["market_ticker"] == ticker.as_str())
+        .unwrap();
+    let mut ts_only = delta.clone();
+    let venue = ts_only["msg"]["ts_ms"].as_u64().unwrap();
+    ts_only["msg"].as_object_mut().unwrap().remove("ts_ms");
+    assert!(matches!(
+        parser.parse(&ts_only.to_string(), 42),
+        Some(FeedEvent::Delta { venue_ts_ms, .. }) if venue_ts_ms == venue
+    ));
+    let snapshot = serde_json::json!({"type": "orderbook_snapshot", "sid": 1, "seq": 1,
+        "msg": {"market_ticker": ticker, "yes_dollars_fp": [["0.4400", "10.00"]], "ts_ms": 7}});
+    assert!(matches!(
+        parser.parse(&snapshot.to_string(), 42),
+        Some(FeedEvent::Snapshot {
+            venue_ts_ms: Some(7),
+            ..
+        })
+    ));
 }
 
 #[tokio::test]
