@@ -1,6 +1,7 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
 use sum100::{
     book::{Applied, BookStore},
+    clock::{Clock, ReplayClock},
     feed::{FeedEvent, kalshi::Parser},
     types::{BookState, ContractId, Level, Side, Venue},
 };
@@ -15,6 +16,10 @@ fn fixture(name: &str) -> Vec<String> {
     .lines()
     .map(str::to_owned)
     .collect()
+}
+
+fn clock() -> Arc<dyn Clock> {
+    Arc::new(ReplayClock::new())
 }
 
 fn ticker() -> String {
@@ -40,7 +45,7 @@ fn assert_book_invariants(store: &BookStore) {
 fn parser_and_bookstore_agree_on_contract_ids() {
     let tickers = vec![ticker()];
     let parser = Parser::new(&tickers).unwrap();
-    let store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let a = parser.contracts.get(Venue::Kalshi, &ticker()).unwrap();
     let b = store.contracts().get(Venue::Kalshi, &ticker()).unwrap();
     assert_eq!(a, b);
@@ -51,7 +56,7 @@ fn parser_and_bookstore_agree_on_contract_ids() {
 fn full_fixture_replay_reaches_pinned_final_book() {
     let tickers = vec![ticker()];
     let mut parser = Parser::new(&tickers).unwrap();
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let mut gaps = 0u64;
     for raw in fixture("stage2-live-orderbook.ndjson") {
         if let Some(event) = parser.parse(&raw, 1789343120404) {
@@ -86,7 +91,7 @@ fn full_fixture_replay_reaches_pinned_final_book() {
 fn no_side_delta_becomes_yes_ask_at_complement() {
     let tickers = vec![ticker()];
     let mut parser = Parser::new(&tickers).unwrap();
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     // Snapshot then deltas through seq 4 (the captured no-side frame).
     for raw in fixture("stage2-live-orderbook.ndjson").into_iter().take(5) {
         if let Some(event) = parser.parse(&raw, 0) {
@@ -118,7 +123,7 @@ fn no_side_delta_becomes_yes_ask_at_complement() {
 fn sequence_gap_marks_resyncing_and_preserves_contents() {
     let tickers = vec![ticker()];
     let mut parser = Parser::new(&tickers).unwrap();
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let frames = fixture("stage2-live-orderbook.ndjson");
     // Snapshot + first delta (seq 2).
     for raw in frames.iter().take(3) {
@@ -149,7 +154,7 @@ fn sequence_gap_marks_resyncing_and_preserves_contents() {
 #[test]
 fn deltas_dropped_while_resyncing_until_snapshot() {
     let tickers = vec![ticker()];
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let id = ContractId(0);
     assert_eq!(
         store.apply(&FeedEvent::Snapshot {
@@ -227,7 +232,7 @@ fn deltas_dropped_while_resyncing_until_snapshot() {
 #[test]
 fn disconnect_invalidates_and_resubscribe_awaits_snapshot() {
     let tickers = vec![ticker()];
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let id = ContractId(0);
     store.apply(&FeedEvent::Snapshot {
         contract: id,
@@ -274,7 +279,7 @@ fn disconnect_invalidates_and_resubscribe_awaits_snapshot() {
 #[test]
 fn level_insert_update_and_remove() {
     let tickers = vec![ticker()];
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let id = ContractId(0);
     store.apply(&FeedEvent::Snapshot {
         contract: id,
@@ -326,7 +331,7 @@ fn level_insert_update_and_remove() {
 #[test]
 fn floor_drift_clamps_at_zero() {
     let tickers = vec![ticker()];
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let id = ContractId(0);
     // Snapshot size 0 (as if "0.01" floored), then remove 1.
     store.apply(&FeedEvent::Snapshot {
@@ -355,7 +360,7 @@ fn floor_drift_clamps_at_zero() {
 #[test]
 fn crossed_book_stays_live_and_is_counted() {
     let tickers = vec![ticker()];
-    let mut store = BookStore::new(Venue::Kalshi, &tickers).unwrap();
+    let mut store = BookStore::new(Venue::Kalshi, &tickers, clock()).unwrap();
     let id = ContractId(0);
     store.apply(&FeedEvent::Snapshot {
         contract: id,

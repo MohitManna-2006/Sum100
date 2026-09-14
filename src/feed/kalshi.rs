@@ -1,7 +1,8 @@
 use super::{Feed, FeedEvent};
 use crate::{
+    clock::Clock,
     metrics::Metrics,
-    record::Recorder,
+    record::{Control, Recorder},
     types::{Contracts, Level, Side, Venue, parse_price_cents, parse_size_contracts},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -16,7 +17,7 @@ use rsa::{
 };
 use serde::Deserialize;
 use sha2::Sha256;
-use std::{future::Future, pin::Pin, time::Duration};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     net::TcpStream,
     sync::{mpsc, watch},
@@ -92,8 +93,10 @@ pub async fn connect(
     credentials: &Credentials,
     tickers: &[String],
     channels: &[&str],
+    clock: &dyn Clock,
 ) -> Result<Socket> {
-    let timestamp = chrono::Utc::now().timestamp_millis();
+    // The venue authenticates against real time; callers pass a wall clock.
+    let timestamp = i64::try_from(clock.now_ms())?;
     let mut request = env.ws_url().into_client_request()?;
     let headers = request.headers_mut();
     headers.insert("KALSHI-ACCESS-KEY", credentials.key_id.clone());
@@ -273,23 +276,40 @@ impl Feed for KalshiFeed {
     }
 }
 impl KalshiFeed {
-    pub fn start(env: Environment, tickers: Vec<String>, recorder: Recorder) -> Result<Self> {
+    /// `clock` supplies receipt timestamps and signing time; live callers pass
+    /// a [`crate::clock::WallClock`].
+    pub fn start(
+        env: Environment,
+        tickers: Vec<String>,
+        mut recorder: Recorder,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self> {
         ensure!(
             !tickers.is_empty() && tickers.iter().all(|s| !s.trim().is_empty()),
             "at least one nonempty ticker is required"
         );
         let credentials = Credentials::from_env()?;
-        let parser = Parser::new(&tickers)?;
+        let mut parser = Parser::new(&tickers)?;
+        parser.metrics.bytes_recorded += recorder.write_control(
+            clock.now_ms(),
+            &Control::SessionStarted {
+                environment: env.name().into(),
+                tickers: tickers.clone(),
+            },
+        )?;
         let (send, events) = mpsc::channel(256);
-        let (shutdown, mut stop) = watch::channel(false);
+        let (shutdown, stop) = watch::channel(false);
         let (resync_tx, resync_rx) = watch::channel(0u64);
+        let link = Link {
+            env,
+            credentials,
+            tickers,
+            clock,
+        };
         let worker = tokio::spawn(async move {
             let mut recorder = recorder;
             let mut parser = parser;
-            let result = tokio::select! {
-                result = run(env, &credentials, &tickers, &mut recorder, &mut parser, send, resync_rx) => result,
-                _ = stop.changed() => Ok(()),
-            };
+            let result = run(&link, &mut recorder, &mut parser, send, resync_rx, stop).await;
             recorder.flush()?;
             parser.metrics.log(Venue::Kalshi);
             result?;
@@ -309,21 +329,46 @@ impl KalshiFeed {
         let _ = self.resync.send(next);
     }
 
-    pub async fn shutdown(self) -> Result<Metrics> {
+    /// Ask the worker to stop at the next frame boundary. Keep calling `next`
+    /// until it returns `None` to receive every event whose bytes were
+    /// recorded, so the consumer's final state matches the recording.
+    pub fn stop(&self) {
         let _ = self.shutdown.send(true);
+    }
+
+    /// Stop, discard undelivered events, and join the worker.
+    pub async fn shutdown(mut self) -> Result<Metrics> {
+        self.stop();
+        // Draining also unblocks a worker waiting on a full channel.
+        while self.events.recv().await.is_some() {}
         self.worker.await?
     }
 }
 
-async fn run(
+struct Link {
     env: Environment,
-    credentials: &Credentials,
-    tickers: &[String],
+    credentials: Credentials,
+    tickers: Vec<String>,
+    clock: Arc<dyn Clock>,
+}
+
+/// Stop is only observed between frames: once a frame or control envelope is
+/// recorded, its events are always sent, so replay never sees events the live
+/// consumer did not.
+async fn run(
+    link: &Link,
     recorder: &mut Recorder,
     parser: &mut Parser,
     send: mpsc::Sender<FeedEvent>,
     mut resync: watch::Receiver<u64>,
+    mut stop: watch::Receiver<bool>,
 ) -> Result<()> {
+    let Link {
+        env,
+        ref credentials,
+        ref tickers,
+        ref clock,
+    } = *link;
     let mut flush = tokio::time::interval(Duration::from_secs(2));
     let mut summary = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(30),
@@ -338,7 +383,14 @@ async fn run(
                 tokio::time::sleep(Duration::from_millis(backoff_ms(attempt, rand::random())))
                     .await;
             }
-            connect(env, credentials, tickers, &["orderbook_delta"]).await
+            connect(
+                env,
+                credentials,
+                tickers,
+                &["orderbook_delta"],
+                clock.as_ref(),
+            )
+            .await
         };
         tokio::pin!(establish);
         let connection = loop {
@@ -346,13 +398,26 @@ async fn run(
                 result = &mut establish => break result,
                 _ = flush.tick() => recorder.flush()?,
                 _ = summary.tick() => parser.metrics.log(Venue::Kalshi),
+                _ = stop.changed() => return Ok(()),
             }
         };
         let mut socket = match connection {
-            Ok(socket) => socket,
+            Ok(socket) => {
+                if reconnect {
+                    parser.metrics.bytes_recorded += recorder
+                        .write_control(clock.now_ms(), &Control::Reconnected { attempt })?;
+                }
+                socket
+            }
             Err(error) => {
                 tracing::warn!(%error, "connection failed; retrying");
                 if !reconnect {
+                    parser.metrics.bytes_recorded += recorder.write_control(
+                        clock.now_ms(),
+                        &Control::Disconnected {
+                            reason: format!("connection failed: {error}"),
+                        },
+                    )?;
                     send.send(FeedEvent::Disconnected {
                         venue: Venue::Kalshi,
                     })
@@ -372,32 +437,37 @@ async fn run(
         while resync.has_changed().unwrap_or(false) {
             resync.borrow_and_update();
         }
-        loop {
+        let reason = loop {
             let frame = tokio::select! {
                 frame = socket.next() => frame,
                 _ = flush.tick() => { recorder.flush()?; continue; }
                 _ = summary.tick() => { parser.metrics.log(Venue::Kalshi); continue; }
+                _ = stop.changed() => return Ok(()),
                 _ = resync.changed() => {
                     tracing::warn!("resync requested; dropping socket");
-                    break;
+                    break "resync requested".to_owned();
                 }
                 _ = tokio::time::sleep_until(subscription_deadline), if !acknowledged => {
-                    tracing::warn!("subscription acknowledgement timed out"); break;
+                    tracing::warn!("subscription acknowledgement timed out");
+                    break "subscription acknowledgement timed out".to_owned();
                 }
                 _ = tokio::time::sleep_until(last_frame + Duration::from_secs(45)) => {
-                    tracing::warn!("websocket idle timeout"); break;
+                    tracing::warn!("websocket idle timeout");
+                    break "websocket idle timeout".to_owned();
                 }
             };
             let frame = match frame {
                 Some(Ok(frame)) => frame,
                 Some(Err(error)) => {
                     tracing::warn!(%error, "websocket disconnected");
-                    break;
+                    break format!("websocket error: {error}");
                 }
-                None => break,
+                None => break "websocket stream ended".to_owned(),
             };
+            // Monotonic instant only schedules the idle timeout; it never
+            // reaches an event, a book, or a recording.
             last_frame = tokio::time::Instant::now();
-            let received = u64::try_from(chrono::Utc::now().timestamp_millis())?;
+            let received = clock.now_ms();
             parser.metrics.messages_received += 1;
             let (kind, raw) = match &frame {
                 Message::Text(text) => ("text", text.to_string()),
@@ -443,6 +513,12 @@ async fn run(
                     attempt = 0;
                     if reconnect {
                         parser.metrics.reconnections += 1;
+                        parser.metrics.bytes_recorded += recorder.write_control(
+                            received,
+                            &Control::Resubscribed {
+                                tickers: tickers.clone(),
+                            },
+                        )?;
                         for ticker in tickers {
                             let contract = parser
                                 .contracts
@@ -456,20 +532,27 @@ async fn run(
                     send.send(event).await?;
                 }
                 if control.as_ref().is_some_and(|v| v["type"] == "error") {
-                    break;
+                    break "venue error message".to_owned();
                 }
             } else if matches!(frame, Message::Close(_)) {
-                break;
+                break "venue close frame".to_owned();
             }
             // Flush automatic pong replies even if the next inbound frame stalls.
             match tokio::time::timeout(Duration::from_secs(5), socket.flush()).await {
                 Ok(Ok(())) => {}
                 result => {
                     tracing::warn!(?result, "websocket flush failed or timed out");
-                    break;
+                    break "websocket flush failed or timed out".to_owned();
                 }
             }
-        }
+        };
+        parser.metrics.bytes_recorded += recorder.write_control(
+            clock.now_ms(),
+            &Control::Disconnected {
+                reason: reason.clone(),
+            },
+        )?;
+        tracing::warn!(reason, "feed disconnected");
         send.send(FeedEvent::Disconnected {
             venue: Venue::Kalshi,
         })

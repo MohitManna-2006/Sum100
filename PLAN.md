@@ -28,7 +28,9 @@ unauthenticated public WebSocket, and parsed-event recorder assumptions.
   endurance test or a tick-to-signal benchmark. Offline book-store tests pass;
   the thirty-minute live side-by-side check against the Kalshi UI remains an
   operator verification step via `dump`.
-- Pending: hour-long endurance session; phase 3 replay; registry/config;
+- Phase 3: injected `Clock`, recorder control envelopes, `ReplayFeed`, pacing,
+  and `replay --verify`; evidence in docs/phase-3-summary.md.
+- Pending: hour-long endurance session; registry/config;
   extended solver properties; execution; second venue; UI.
 
 Use [README.md](README.md) for working commands and setup. The supplied original

@@ -1,4 +1,5 @@
 pub mod kalshi;
+pub mod replay;
 pub mod rest;
 
 use crate::types::{Cents, ContractId, Level, Side, Venue};

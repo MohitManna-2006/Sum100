@@ -1,0 +1,34 @@
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       uninitialized         0            -            -            -            -        0
+KXBTCD-26SEP1417-T77499.99       uninitialized         0            -            -            -            -        0
+KXBTCD-26SEP1417-T77749.99       uninitialized         0            -            -            -            -        0
+KXBTCD-26SEP1417-T77999.99       uninitialized         0            -            -            -            -        0
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               1702      72x8100      73x4738      27x4738      28x8100     1080
+KXBTCD-26SEP1417-T77499.99       live               1684     57x11177       58x146       42x146     43x11177     4918
+KXBTCD-26SEP1417-T77749.99       live               1700      50x4654      52x3507      48x3507      50x4654     1080
+KXBTCD-26SEP1417-T77999.99       live               1650      43x3595      45x8140      55x8140      57x3595     6846
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               1702      72x8100      73x4738      27x4738      28x8100     1087
+KXBTCD-26SEP1417-T77499.99       live               1684     57x11177       58x146       42x146     43x11177     4925
+KXBTCD-26SEP1417-T77749.99       live               1700      50x4654      52x3507      48x3507      50x4654     1087
+KXBTCD-26SEP1417-T77999.99       live               1650      43x3595      45x8140      55x8140      57x3595     6853
+
+# sum100 state digest v1 (timestamps excluded)
+book KXBTCD-26SEP1417-T76999.99 cb60591020797950352f45f099156cabe5fa59989713f071cd274ec2129b50d0
+book KXBTCD-26SEP1417-T77499.99 5a3cc908bb8bc6a250d9ea0db297c315ee32f585b74e1dcdfc6053c0a60eb5ae
+book KXBTCD-26SEP1417-T77749.99 8ad35ae609c7d8c708140b9c5fe1321b66c170cdecb5c2e9d3b5ba784a73e4ea
+book KXBTCD-26SEP1417-T77999.99 ed2fc396a2c5fe4e88c8a77021a1f892c3d1e77a83a365c3f05eb117ea95f984
+gaps e0644203f26097982ff8e24b4cf746860c0ec02ff2593f76c2c73dd77acd35f9
+gap 579 disconnected kalshi
+gap 580 resubscribed KXBTCD-26SEP1417-T76999.99
+gap 581 resubscribed KXBTCD-26SEP1417-T77499.99
+gap 582 resubscribed KXBTCD-26SEP1417-T77749.99
+gap 583 resubscribed KXBTCD-26SEP1417-T77999.99
+gap 584 resynced KXBTCD-26SEP1417-T76999.99 seq=1
+gap 585 resynced KXBTCD-26SEP1417-T77499.99 seq=2
+gap 586 resynced KXBTCD-26SEP1417-T77749.99 seq=3
+gap 587 resynced KXBTCD-26SEP1417-T77999.99 seq=4
+metrics events=2285 snapshots_applied=8 deltas_applied=2272 deltas_skipped_not_live=0 sequence_gaps=0 resync_requests=0 negative_level_clamps=1 crossed_books_observed=0

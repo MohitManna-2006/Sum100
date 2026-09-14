@@ -1,0 +1,17 @@
+$ shasum -a 256 data/production/kalshi-2026-09-14.ndjson.gz
+ae55be58e9106b20fe493debe927e50362d69ebf733ed206463a57f07852bcb2  data/production/kalshi-2026-09-14.ndjson.gz
+
+$ sandbox-exec -p '(version 1)(allow default)(deny network*)' env -i NO_COLOR=1 ./target/release/sum100 replay --venue kalshi --file data/production/kalshi-2026-09-14.ndjson.gz --tickers YOUR-OPEN-TICKER,KXBTCD-26SEP1417-T76999.99
+2026-09-14T03:16:21.765679Z  WARN sum100::feed::kalshi: venue payload rejected error=snapshot missing side raw="{\"type\":\"orderbook_snapshot\",\"sid\":1,\"seq\":1,\"msg\":{\"market_ticker\":\"YOUR-OPEN-TICKER\",\"market_id\":\"\"}}"
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+YOUR-OPEN-TICKER                 uninitialized         0            -            -            -            -        0
+KXBTCD-26SEP1417-T76999.99       live               1577      66x8134      67x3801      33x3801      34x8134        0
+
+2026-09-14T03:16:21.771324Z  INFO sum100::book: book store metrics self=BookMetrics { snapshots_applied: 1, deltas_applied: 1576, deltas_skipped_not_live: 0, sequence_gaps: 0, resync_requests: 0, negative_level_clamps: 0, crossed_books_observed: 0 } uninitialized=1 resyncing=0 live=1
+2026-09-14T03:16:21.771331Z  INFO sum100: replay finished metrics=Metrics { messages_received: 1585, parse_errors: 1, parse_attempts: 1580, unknown_messages: 0, reconnections: 0, bytes_recorded: 0, discarded_size_hundredths: 416, latency_buckets: [0, 0, 0, 0, 0, 0, 1576], clock_skew_samples: 0 }
+# sum100 state digest v1 (timestamps excluded)
+book YOUR-OPEN-TICKER f10022fff2bf83d478d4a88545695ff95056d9fce23455a067a727b45682e92f
+book KXBTCD-26SEP1417-T76999.99 8203ff840b8cafae9872422da29ab0a787a5816b092ba312a534e72c51e6af77
+gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+metrics events=1577 snapshots_applied=1 deltas_applied=1576 deltas_skipped_not_live=0 sequence_gaps=0 resync_requests=0 negative_level_clamps=0 crossed_books_observed=0
+exit=0

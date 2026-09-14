@@ -1,0 +1,49 @@
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       uninitialized         0            -            -            -            -        0
+KXBTCD-26SEP1417-T77499.99       uninitialized         0            -            -            -            -        0
+KXBTCD-26SEP1417-T77749.99       uninitialized         0            -            -            -            -        0
+KXBTCD-26SEP1417-T77999.99       uninitialized         0            -            -            -            -        0
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               1291      71x8100      72x6738      28x6738      29x8100     5334
+KXBTCD-26SEP1417-T77499.99       live               1353      57x4641      58x3251      42x3251      43x4641      158
+KXBTCD-26SEP1417-T77749.99       live               1352      49x3560       51x115       49x115      51x3560      227
+KXBTCD-26SEP1417-T77999.99       live               1344       42x111         43x4         57x4       58x111      631
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               1291      71x8100      72x6738      28x6738      29x8100   105356
+KXBTCD-26SEP1417-T77499.99       live               1353      57x4641      58x3251      42x3251      43x4641   100180
+KXBTCD-26SEP1417-T77749.99       live               1352      49x3560       51x115       49x115      51x3560   100249
+KXBTCD-26SEP1417-T77999.99       live               1344       42x111         43x4         57x4       58x111   100653
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               3882      70x8100      71x5625      29x5625      30x8100      352
+KXBTCD-26SEP1417-T77499.99       live               3865      56x3627      58x5582      42x5582      44x3627     2332
+KXBTCD-26SEP1417-T77749.99       live               3874      48x3568      50x3501      50x3501      52x3568     1219
+KXBTCD-26SEP1417-T77999.99       live               3864      41x3185      43x8105      57x8105      59x3185     2448
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               4803      70x8100      71x6700      29x6700      30x8100      510
+KXBTCD-26SEP1417-T77499.99       live               4806      55x4346      58x5574      42x5574      45x4346      475
+KXBTCD-26SEP1417-T77749.99       live               4818      48x3568      50x3503      50x3503      52x3568       57
+KXBTCD-26SEP1417-T77999.99       live               4804      40x5160      42x8300      58x8300      60x5160      509
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               5977      70x8130      72x6593      28x6593      30x8130     1540
+KXBTCD-26SEP1417-T77499.99       live               5978      56x4521      58x5574      42x5574      44x4521     1539
+KXBTCD-26SEP1417-T77749.99       live               5979      48x3573      50x3501      50x3501      52x3573     1539
+KXBTCD-26SEP1417-T77999.99       live               5980      41x3617      43x8300      57x8300      59x3617     1539
+
+ticker                           state               seq      yes_bid      yes_ask       no_bid       no_ask   age_ms
+KXBTCD-26SEP1417-T76999.99       live               6644      71x8100      72x4708      28x4708      29x8100      260
+KXBTCD-26SEP1417-T77499.99       live               6642      57x3521      58x3460      42x3460      43x3521      811
+KXBTCD-26SEP1417-T77749.99       live               6597      49x3623      51x3515      49x3515      51x3623     3834
+KXBTCD-26SEP1417-T77999.99       live               6599      42x3596      44x8129      56x8129      58x3596     3774
+
+# sum100 state digest v1 (timestamps excluded)
+book KXBTCD-26SEP1417-T76999.99 d2d34ccb6e4cc9baf031eb4f125639feac6b77f1872480a4c8a7c62bfc45f1f7
+book KXBTCD-26SEP1417-T77499.99 9556f59aa42d7780a5a7fca9249b7b9d7de5564442aba4abef8e493d69dd46cf
+book KXBTCD-26SEP1417-T77749.99 c40ca651ea34cbbf8b742560f680d2a201d1e377d9f2c0312a3669d68388faf5
+book KXBTCD-26SEP1417-T77999.99 ff53fb00e70f2803c1c3fe28fc3ed7ee6b53d97c11c2e0b90749360dd451ce67
+gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+metrics events=6644 snapshots_applied=4 deltas_applied=6640 deltas_skipped_not_live=0 sequence_gaps=0 resync_requests=0 negative_level_clamps=8 crossed_books_observed=0

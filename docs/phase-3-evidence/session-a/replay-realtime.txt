@@ -1,0 +1,21 @@
+$ gzip -dc data/phase3-a/production/kalshi-2026-09-14.ndjson.gz | python3 -c 'first/last received_at_ms'
+first 1789355699299 last 1789355879254 span_ms 179955
+
+$ sandbox-exec -p '(version 1)(allow default)(deny network*)' env -i NO_COLOR=1 /usr/bin/time -p ./target/release/sum100 replay --venue kalshi --file data/phase3-a/production/kalshi-2026-09-14.ndjson.gz --pace realtime --verify --expect-file docs/phase-3-evidence/session-a/live.digest --digest-out docs/phase-3-evidence/session-a/replay-realtime.digest
+2026-09-14T03:21:23.167039Z  INFO sum100::book: book store metrics self=BookMetrics { snapshots_applied: 4, deltas_applied: 3885, deltas_skipped_not_live: 0, sequence_gaps: 0, resync_requests: 0, negative_level_clamps: 4, crossed_books_observed: 0 } uninitialized=0 resyncing=0 live=4
+2026-09-14T03:21:23.167171Z  INFO sum100: replay finished metrics=Metrics { messages_received: 3890, parse_errors: 0, parse_attempts: 3890, unknown_messages: 0, reconnections: 0, bytes_recorded: 0, discarded_size_hundredths: 2225, latency_buckets: [0, 0, 0, 0, 0, 0, 3885], clock_skew_samples: 0 }
+# sum100 state digest v1 (timestamps excluded)
+book KXBTCD-26SEP1417-T76999.99 c20d1d24b54ffd9071c19cb7413c63cfbe000b0f5b144f95f60c393d4a597262
+book KXBTCD-26SEP1417-T77499.99 bd6db36d7d6b8ec7496328e6d035d405c5a5b74ed997694ce49041f737d6f071
+book KXBTCD-26SEP1417-T77749.99 58744e6ebc3e2f056a0b8cb66cefbb6d4681fc98159aa3e13acde710fcbd39b5
+book KXBTCD-26SEP1417-T77999.99 5b23939eef0583537bc6b8d2b130a8ca92fce6ffa1e73d6dacca1ed18f6b635d
+gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+metrics events=3889 snapshots_applied=4 deltas_applied=3885 deltas_skipped_not_live=0 sequence_gaps=0 resync_requests=0 negative_level_clamps=4 crossed_books_observed=0
+verify OK: 4 book hash(es) and gap log hash match
+real 179.66
+user 0.16
+sys 0.10
+exit=0
+
+$ diff docs/phase-3-evidence/session-a/live.digest docs/phase-3-evidence/session-a/replay-realtime.digest && echo IDENTICAL
+IDENTICAL

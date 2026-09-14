@@ -187,7 +187,7 @@ pub enum FeedEvent {
 }
 ```
 
-KalshiFeed implements this trait now. PolymarketFeed and ReplayFeed are planned.
+KalshiFeed and ReplayFeed (phase 3) implement this trait now. PolymarketFeed is planned.
 Snapshots preserve both resting outcome sides; deltas preserve wire yes/no and
 signed changes. The feed performs no no-price complement conversion. Phase 2's
 book store owns book state and `100 - P`. Snapshot timestamps without a
@@ -334,7 +334,10 @@ Only one trailing LF is removed from text. Decoding the envelope restores the
 original payload bytes under that single-LF rule. Completed gzip members are
 flushed and synced every two seconds and at graceful shutdown. An OS lock
 prevents concurrent writers; append validates the existing daily corpus and
-continues its sequence. See README for crash-tail recovery and reader details.
+continues its sequence. Feed lifecycle events with no venue bytes (session start,
+disconnect, reconnect, resubscribe) are written into the same stream as `control`
+envelopes so replay reproduces the live resync path; older files simply lack them.
+See README for crash-tail recovery and reader details.
 
 File format is deliberately boring. It is greppable, streamable, compresses well, and requires no schema migration. When the corpus grows large enough that analysis is slow, the answer is to load it into Polars or DuckDB from a Python notebook, not to build query infrastructure in Rust.
 

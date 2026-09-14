@@ -1,6 +1,6 @@
 # Sum100
 
-Real-time coherence and arbitrage engine for prediction markets, in Rust. Paper trading only. Phase 2 provides the book store: live yes/no books with `100 - P` complement conversion, subscription-scoped sequence gap detection, forced-reconnect resync, and a `dump` command for visual verification. Replay scheduling and solver integration remain later phases.
+Real-time coherence and arbitrage engine for prediction markets, in Rust. Paper trading only. Phase 2 provides the book store: live yes/no books with `100 - P` complement conversion, subscription-scoped sequence gap detection, forced-reconnect resync, and a `dump` command for visual verification. Phase 3 adds deterministic offline replay: `replay` drives a recorded file through the same parser and book store under an injected clock and verifies final book and gap-log hashes against the live run. Solver integration remains a later phase.
 
 ## Design documents and scope
 
@@ -9,7 +9,7 @@ and phased roadmap, reconciled with the approved stage 2 and phase 2 decisions. 
 supplied README is preserved verbatim in [README.reference.md](README.reference.md).
 It uses the earlier name Parity and describes planned commands; this README is
 the source for current setup and supported behavior. The broader roadmap does
-not mean the replay engine, registry, or frontend already exists.
+not mean the registry, solver integration, or frontend already exists.
 
 ## Setup
 
@@ -37,6 +37,14 @@ cargo run --release -- dump --venue kalshi --prod \
 # Read-only production recording with a production key; graceful timed shutdown.
 cargo run --release -- record --venue kalshi --prod \
   --tickers KXBTCD-26SEP1417-T76999.99 --out data --seconds 70
+
+# Live dump that also writes its final state digest for replay verification.
+cargo run --release -- dump --venue kalshi --prod \
+  --tickers KXBTCD-26SEP1417-T76999.99 --out data --seconds 180 --digest-out live.digest
+
+# Offline replay (no credentials, no network) verified against that live run.
+cargo run --release -- replay --venue kalshi \
+  --file data/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file live.digest
 
 # Multiple tickers are comma-separated. No --seconds means run until Ctrl-C.
 cargo run --release -- probe --prod --ticker KXBTCD-26SEP1417-T76999.99
@@ -69,6 +77,8 @@ Files are `OUT/demo/kalshi-YYYY-MM-DD.ndjson.gz` or `OUT/production/kalshi-YYYY-
 
 Each decompressed line is an envelope with `received_at_ms`, monotonically increasing `sequence`, `kind`, and `raw`. For `kind: "text"`, `raw` is a JSON **string**, escaped only to fit the envelope. The recorder never parses the venue JSON. Decoding that string restores every input byte except **one trailing LF**, if present. Whitespace, field order, numeric spelling, Unicode escapes, malformed JSON, and embedded newlines all survive. There are no blank separator lines. Binary, ping, pong, and close payload bytes are stored as base64 with corresponding `*_base64` kinds; a close payload includes its two-byte status code and reason.
 
+Feed lifecycle events that have no venue bytes are recorded in the same stream as `kind: "control"` envelopes whose `raw` string is a JSON object tagged by `event`: `session_started` (environment and tickers, once per process), `disconnected` (with a reason, immediately before the feed emits `Disconnected`), `reconnected` (attempt number), and `resubscribed` (tickers, immediately before the feed emits `Resubscribed`). The envelope `kind` is the tag, so venue text can never be mistaken for a control event. Files recorded before phase 3 contain no control envelopes and still parse.
+
 Every two seconds, and on graceful shutdown, the recorder finishes and syncs a gzip member. Files contain concatenated members: use `flate2::read::MultiGzDecoder`, Python `gzip`, or `gzip -dc`. `read_records` supplies a streaming envelope reader. Restarting validates the existing day's file and resumes above its last sequence; a new process on a new day may start at 1, so replay identity includes the daily filename. Receipt timestamps do not define sequence order.
 
 A crash can leave an incomplete final member; completed members remain recoverable. An unreadable existing tail causes an explicit error on append rather than silently hiding the corruption. Retain the original file and recover its valid prefix before resuming into that directory. Concurrent writers are rejected. Disk errors stop the feed rather than allow unrecorded parsing.
@@ -78,6 +88,14 @@ A crash can leave an incomplete final member; completed members remain recoverab
 gzip -t data/production/kalshi-2026-09-13.ndjson.gz
 gzip -dc data/production/kalshi-2026-09-13.ndjson.gz | head
 ```
+
+## Replay
+
+`replay` is a `Feed` implementation, not a mode. It streams the gzip file, passes each `text` payload to the same `Parser::parse` call the live feed makes with the recorded receipt time, and turns control envelopes back into `Disconnected` and `Resubscribed`. The `Clock` trait (`src/clock.rs`) is the only wall-clock read in the crate: live commands pass `WallClock`; replay passes a `ReplayClock` advanced to each event's local receipt time (never the venue `ts`). Book `updated_at_ms` comes from that clock.
+
+`--pace max` (default) runs flat out; `--pace realtime` sleeps recorded inter-arrival gaps. A daily file can hold several runs: each marked run is a session, and records before the first marker form one unmarked session. Pass `--session N` when a file holds more than one; unmarked sessions also need `--tickers`. A run that crosses UTC midnight is split across two daily files and cannot be replayed as one session.
+
+`dump` and `replay` apply events through the same `GapLog::apply` step and print a digest: a SHA-256 per contract over its canonical book (state, seq, and nonzero yes/no levels), a SHA-256 over the gap log (gaps, disconnects, resubscribes, and snapshot resyncs, each keyed by event position), and informational book metrics. No timestamps enter the digest. `dump` stops its feed and applies every already-recorded event before printing, so its digest describes exactly the recorded stream. `replay --verify` compares hashes from `--expect-file` (a `--digest-out` file) or `--expect-book TICKER=SHA256` and `--expect-gaps SHA256`, and exits nonzero on any mismatch. Evidence is in [docs/phase-3-summary.md](docs/phase-3-summary.md).
 
 ## Fixtures and verification
 

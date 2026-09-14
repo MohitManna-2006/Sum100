@@ -1,6 +1,12 @@
 //! Receipt envelopes preserve raw payloads independently of the venue parser.
 //! Each flush closes a gzip member so the durable prefix is readable after a
 //! crash. Readers must support concatenated members (MultiGzDecoder).
+//!
+//! Feed lifecycle events that never arrive as venue bytes (disconnect,
+//! reconnect, resubscribe) are written into the same stream as `kind:
+//! "control"` envelopes so replay takes the same resync path the live run did.
+//! The tag is the envelope `kind`, never the payload content; files recorded
+//! before control envelopes existed parse unchanged and simply contain none.
 use anyhow::{Context, Result, ensure};
 use chrono::{DateTime, Utc};
 use flate2::{Compression, read::MultiGzDecoder, write::GzEncoder};
@@ -19,6 +25,40 @@ pub struct Record {
     /// Text is JSON-escaped as a string, never deserialized/re-serialized.
     /// Non-text WebSocket payloads use base64; kind identifies the encoding.
     pub raw: String,
+}
+
+/// Envelope kind reserved for [`Control`]; no WebSocket frame uses it.
+pub const CONTROL_KIND: &str = "control";
+
+/// Feed lifecycle event, JSON-encoded into the envelope `raw` string.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum Control {
+    /// Once per feed process, before the first connection attempt. Marks
+    /// session boundaries inside a daily file that several runs appended to.
+    SessionStarted {
+        environment: String,
+        tickers: Vec<String>,
+    },
+    /// Written immediately before the feed emits `FeedEvent::Disconnected`.
+    Disconnected { reason: String },
+    /// A later handshake succeeded; emits no feed event.
+    Reconnected { attempt: u32 },
+    /// Written immediately before the feed emits `FeedEvent::Resubscribed`
+    /// for each ticker, in this order.
+    Resubscribed { tickers: Vec<String> },
+}
+
+impl Record {
+    /// `Some` for a control envelope, `None` for a venue payload.
+    pub fn control(&self) -> Result<Option<Control>> {
+        if self.kind != CONTROL_KIND {
+            return Ok(None);
+        }
+        let control = serde_json::from_str(&self.raw)
+            .with_context(|| format!("malformed control envelope {}", self.sequence))?;
+        Ok(Some(control))
+    }
 }
 
 pub struct Recorder {
@@ -68,7 +108,24 @@ impl Recorder {
         }
         Ok(())
     }
+    /// Record one venue payload. `kind` names the WebSocket frame encoding.
     pub fn write(&mut self, received_at_ms: u64, kind: &str, raw: &str) -> Result<u64> {
+        ensure!(
+            kind != CONTROL_KIND,
+            "control envelopes must use write_control"
+        );
+        self.append(received_at_ms, kind, raw)
+    }
+
+    pub fn write_control(&mut self, received_at_ms: u64, control: &Control) -> Result<u64> {
+        self.append(
+            received_at_ms,
+            CONTROL_KIND,
+            &serde_json::to_string(control)?,
+        )
+    }
+
+    fn append(&mut self, received_at_ms: u64, kind: &str, raw: &str) -> Result<u64> {
         self.select_day(received_at_ms)?;
         self.sequence = self
             .sequence
@@ -107,7 +164,7 @@ impl Recorder {
     }
 }
 
-pub fn read_records(path: &Path) -> Result<impl Iterator<Item = Result<Record>>> {
+pub fn read_records(path: &Path) -> Result<impl Iterator<Item = Result<Record>> + Send + use<>> {
     let reader = BufReader::new(MultiGzDecoder::new(File::open(path)?));
     Ok(reader.lines().map(|line| {
         let line = line?;

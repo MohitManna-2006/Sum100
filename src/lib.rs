@@ -1,7 +1,9 @@
 pub mod book;
+pub mod clock;
 pub mod feed;
 pub mod fees;
 pub mod metrics;
 pub mod record;
 pub mod solver;
 pub mod types;
+pub mod verify;
