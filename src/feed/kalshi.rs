@@ -133,10 +133,34 @@ struct Envelope {
 #[derive(Deserialize)]
 struct Snapshot {
     market_ticker: String,
-    // A missing side is a schema error; explicit null means no resting levels.
-    yes_dollars_fp: serde_json::Value,
-    no_dollars_fp: serde_json::Value,
+    #[serde(default)]
+    yes_dollars_fp: SnapshotSide,
+    #[serde(default)]
+    no_dollars_fp: SnapshotSide,
     ts_ms: Option<u64>,
+}
+
+/// How one side of a snapshot arrived. Kalshi omits the key of a side with no
+/// resting orders (observed for far strikes), so absence is a valid empty
+/// side, distinct from a malformed one: any value other than null or a list
+/// of `[price, size]` string pairs fails deserialization.
+#[derive(Default)]
+enum SnapshotSide {
+    #[default]
+    Absent,
+    Null,
+    Levels(Vec<(String, String)>),
+}
+
+impl<'de> Deserialize<'de> for SnapshotSide {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(
+            match Option::<Vec<(String, String)>>::deserialize(deserializer)? {
+                None => Self::Null,
+                Some(rows) => Self::Levels(rows),
+            },
+        )
+    }
 }
 #[derive(Deserialize)]
 struct Delta {
@@ -177,23 +201,26 @@ impl Parser {
     fn parse_inner(&mut self, raw: &str, receipt: u64) -> Result<Option<FeedEvent>> {
         let e: Envelope = serde_json::from_str(raw)?;
         let mut discarded = 0;
+        let mut absent_sides = 0;
         let event = match e.kind.as_str() {
             "orderbook_snapshot" => {
-                // Require the keys even though JSON null is a legitimate empty side.
-                ensure!(
-                    e.msg.get("yes_dollars_fp").is_some() && e.msg.get("no_dollars_fp").is_some(),
-                    "snapshot missing side"
-                );
                 let m: Snapshot = serde_json::from_value(e.msg)?;
+                absent_sides = [&m.yes_dollars_fp, &m.no_dollars_fp]
+                    .into_iter()
+                    .filter(|side| matches!(side, SnapshotSide::Absent))
+                    .count() as u64;
+                // One present side proves the payload uses this schema. With
+                // both keys absent, an empty market and renamed keys look
+                // identical, so that stays a schema error.
+                ensure!(absent_sides < 2, "snapshot has neither side");
                 let contract = self
                     .contracts
                     .get(Venue::Kalshi, &m.market_ticker)
                     .context("snapshot for unsubscribed ticker")?;
-                let mut levels = |value: serde_json::Value| -> Result<Vec<Level>> {
-                    let rows: Vec<(String, String)> = if value.is_null() {
-                        Vec::new()
-                    } else {
-                        serde_json::from_value(value)?
+                let mut levels = |side: SnapshotSide| -> Result<Vec<Level>> {
+                    let rows = match side {
+                        SnapshotSide::Absent | SnapshotSide::Null => Vec::new(),
+                        SnapshotSide::Levels(rows) => rows,
                     };
                     rows.into_iter()
                         .map(|(p, s)| {
@@ -252,6 +279,7 @@ impl Parser {
             .metrics
             .discarded_size_hundredths
             .saturating_add(discarded);
+        self.metrics.snapshot_sides_absent += absent_sides;
         if let FeedEvent::Delta { ts_ms, .. } = event {
             self.metrics.observe_latency(receipt, ts_ms);
         }

@@ -188,7 +188,9 @@ pub enum FeedEvent {
 ```
 
 KalshiFeed and ReplayFeed (phase 3) implement this trait now. PolymarketFeed is planned.
-Snapshots preserve both resting outcome sides; deltas preserve wire yes/no and
+Snapshots preserve both resting outcome sides; a side whose key Kalshi omits
+(far strikes) is an empty side, while both keys absent remains a schema error.
+Deltas preserve wire yes/no and
 signed changes. The feed performs no no-price complement conversion. Phase 2's
 book store owns book state and `100 - P`. Snapshot timestamps without a
 venue timestamp use the recorded local receipt time.
