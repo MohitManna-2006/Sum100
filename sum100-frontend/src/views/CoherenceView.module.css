@@ -78,6 +78,10 @@
   content: "";
 }
 
+.coherent {
+  color: var(--color-accent-gain);
+}
+
 .incoherent {
   color: var(--color-accent-gain);
 }
