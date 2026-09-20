@@ -1,3 +1,4 @@
+pub mod api;
 pub mod book;
 pub mod clock;
 pub mod config;

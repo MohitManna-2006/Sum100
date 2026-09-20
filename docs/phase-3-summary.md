@@ -9,16 +9,16 @@ the phase 2 source were used as ground truth instead.
 
 ## 1. Exit criteria
 
-| # | Criterion | Status | Evidence |
-|---|---|---|---|
-| 1 | `cargo test`, `cargo clippy`, `cargo fmt --check` clean | **Met** | §2.1 |
-| 2 | Max-pace replay book hashes identical to the live run | **Met**: 4 production sessions, 92 book hashes | §2.2 |
-| 3 | Replay gap log identical to the live gap log | **Met**: same 4 sessions, up to 25,011 entries | §2.2, §2.3 |
-| 4 | A session with at least one real disconnect replays with the live resync behavior | **Met, with caveat**: the disconnect followed a stall induced with SIGSTOP; see §5 | §2.3 |
-| 5 | Replay works with no credentials and no network | **Met**: `env -i` inside a macOS sandbox that denies all network | §2.4 |
-| 6 | An older file without control envelopes still replays | **Met**: 3 phase 2 recordings | §2.5 |
+| #   | Criterion                                                                         | Status                                                                             | Evidence   |
+| --- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------- |
+| 1   | `cargo test`, `cargo clippy`, `cargo fmt --check` clean                           | **Met**                                                                            | §2.1       |
+| 2   | Max-pace replay book hashes identical to the live run                             | **Met**: 4 production sessions, 92 book hashes                                     | §2.2       |
+| 3   | Replay gap log identical to the live gap log                                      | **Met**: same 4 sessions, up to 25,011 entries                                     | §2.2, §2.3 |
+| 4   | A session with at least one real disconnect replays with the live resync behavior | **Met, with caveat**: the disconnect followed a stall induced with SIGSTOP; see §5 | §2.3       |
+| 5   | Replay works with no credentials and no network                                   | **Met**: `env -i` inside a macOS sandbox that denies all network                   | §2.4       |
+| 6   | An older file without control envelopes still replays                             | **Met**: 3 phase 2 recordings                                                      | §2.5       |
 
-Raw logs, digests, and capture scripts are in [`docs/phase-3-evidence/`](phase-3-evidence/).
+Raw logs, digests, and capture scripts are in `[docs/phase-3-evidence/](phase-3-evidence/)`.
 Recordings under `data/` are gitignored; their SHA-256 values are below so they can be
 matched. One recording, the session C disconnect session, is checked in as a test fixture.
 
@@ -26,7 +26,7 @@ matched. One recording, the session C disconnect session, is checked in as a tes
 
 ### 2.1 Gate
 
-Full output: [`phase-3-evidence/gate.txt`](phase-3-evidence/gate.txt). The commands match CI.
+Full output: `[phase-3-evidence/gate.txt](phase-3-evidence/gate.txt)`. The commands match CI.
 
 ```
 $ cargo fmt --all -- --check                  exit=0
@@ -62,12 +62,12 @@ diff docs/phase-3-evidence/session-X/live.digest docs/phase-3-evidence/session-X
 `$T` is `KXBTCD-26SEP1417-T76999.99,-T77499.99,-T77749.99,-T77999.99` (full tickers in
 the scripts). Session D used all 80 active strikes of `KXBTCD-26SEP1417`.
 
-| Session | Live window (UTC) | Recording SHA-256 | Envelopes (text / control) | Events | Result |
-|---|---|---|---|---|---|
-| A: clean, 180 s | 03:14:59 to 03:17:59 | `3f1767916cc1eaab2906a3d3fa2cb3a543f93ffe661cbf557e98559625d5a3a6` | 3,890 / 1 | 3,889 | `verify OK: 4 book hash(es) and gap log hash match`; `diff` empty |
-| B: 100 s SIGSTOP, no drop | 03:15:00 to 03:20:30 | `b41446dfbe2e9a557e6bf9a2359d7a42011a414254bc8a569aa98117c8199b5e` | 6,645 / 1 | 6,644 | `verify OK: 4 …`; `diff` empty |
-| C: 480 s SIGSTOP, **disconnect** | 03:19:21 to 03:29:21 | `7d092c75fc4dad8fd530e61d3c23bf1323c74268b4419dff824e554d936ee97e` | 2,282 / 4 | 2,285 | `verify OK: 4 …`; `diff` empty |
-| D: 80 tickers, **227 resync drops** | 03:19:20 to 03:26:20 | `74cfa726635cdc1ce65cd0868b5372ad135129c717567033f89b87b08fad0d48` | 20,579 / 680 | 27,005 | `verify OK: 80 …`; `diff` empty |
+| Session                             | Live window (UTC)    | Recording SHA-256                                                  | Envelopes (text / control) | Events | Result                                                            |
+| ----------------------------------- | -------------------- | ------------------------------------------------------------------ | -------------------------- | ------ | ----------------------------------------------------------------- |
+| A: clean, 180 s                     | 03:14:59 to 03:17:59 | `3f1767916cc1eaab2906a3d3fa2cb3a543f93ffe661cbf557e98559625d5a3a6` | 3,890 / 1                  | 3,889  | `verify OK: 4 book hash(es) and gap log hash match`; `diff` empty |
+| B: 100 s SIGSTOP, no drop           | 03:15:00 to 03:20:30 | `b41446dfbe2e9a557e6bf9a2359d7a42011a414254bc8a569aa98117c8199b5e` | 6,645 / 1                  | 6,644  | `verify OK: 4 …`; `diff` empty                                    |
+| C: 480 s SIGSTOP, **disconnect**    | 03:19:21 to 03:29:21 | `7d092c75fc4dad8fd530e61d3c23bf1323c74268b4419dff824e554d936ee97e` | 2,282 / 4                  | 2,285  | `verify OK: 4 …`; `diff` empty                                    |
+| D: 80 tickers, **227 resync drops** | 03:19:20 to 03:26:20 | `74cfa726635cdc1ce65cd0868b5372ad135129c717567033f89b87b08fad0d48` | 20,579 / 680               | 27,005 | `verify OK: 80 …`; `diff` empty                                   |
 
 `diff` compares the whole digest file, so the informational metrics line also matched:
 snapshots, deltas applied or skipped, gaps, resync requests, clamps, and the event count.
@@ -154,8 +154,7 @@ digest byte for byte on every `cargo test`.
 
 **Session D: 227 real sequence gaps, each followed by the forced-reconnect resync.**
 Every gap dropped the production socket, reconnected, resubscribed 80 tickers, and fetched
-fresh snapshots. There were also 3 handshake timeouts (`connection failed; retrying
-error=deadline has elapsed`). Control envelopes: 227 `disconnected`, 226 `reconnected`,
+fresh snapshots. There were also 3 handshake timeouts (`connection failed; retrying error=deadline has elapsed`). Control envelopes: 227 `disconnected`, 226 `reconnected`,
 226 `resubscribed`, 1 `session_started`; live `reconnections: 226`. Replay reproduced the
 full 25,011-entry gap log. The gaps are false positives caused by a phase 2 defect (§4).
 That does not affect replay fidelity, but it means these drops came from the client's
@@ -167,7 +166,7 @@ sequence gap. It is kept as an extra stall-and-burst determinism case.
 
 ### 2.4 No credentials, no network
 
-[`phase-3-evidence/legacy/no-network-no-credentials.txt`](phase-3-evidence/legacy/no-network-no-credentials.txt):
+`[phase-3-evidence/legacy/no-network-no-credentials.txt](phase-3-evidence/legacy/no-network-no-credentials.txt)`:
 
 ```
 $ sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/curl ... https://external-api.kalshi.com/...
@@ -192,17 +191,17 @@ A mismatch exits nonzero with `verify FAILED gaps: expected …, got …` (teste
 
 ### 2.5 Older recordings (no control envelopes)
 
-All three phase 2 recordings replay. See [`phase-3-evidence/legacy/`](phase-3-evidence/legacy/).
+All three phase 2 recordings replay. See `[phase-3-evidence/legacy/](phase-3-evidence/legacy/)`.
 
-| File | SHA-256 | Result |
-|---|---|---|
-| `data/stage2-validation/production/kalshi-2026-09-13.ndjson.gz` | `cc644cf5…aacc5500` (matches tests/fixtures/README.md) | 0 control envelopes. Without `--tickers`: `Error: session 1 predates session markers; pass --tickers as recorded`. With it: seq 461, yes bid 44x4294, yes ask 46x100, 461 events, 0 parse errors, the same final book pinned by phase 2 in `tests/book.rs` |
-| `data/stage2-final-validation/production/kalshi-2026-09-13.ndjson.gz` | `4f42d5da…be8ecd8a` | 276 events, 0 gaps |
-| `data/production/kalshi-2026-09-14.ndjson.gz` | `ae55be58…7852bcb2` | Two unmarked process runs (a `YOUR-OPEN-TICKER` placeholder run, then `T76999.99`). Replayed as one session with both tickers: 1,577 events, final `T76999.99` seq 1577. The placeholder's one-sided snapshot produced the same `snapshot missing side` parse error the phase 2 parser raises live |
+| File                                                                  | SHA-256                                                | Result                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data/stage2-validation/production/kalshi-2026-09-13.ndjson.gz`       | `cc644cf5…aacc5500` (matches tests/fixtures/README.md) | 0 control envelopes. Without `--tickers`: `Error: session 1 predates session markers; pass --tickers as recorded`. With it: seq 461, yes bid 44x4294, yes ask 46x100, 461 events, 0 parse errors, the same final book pinned by phase 2 in `tests/book.rs`                                         |
+| `data/stage2-final-validation/production/kalshi-2026-09-13.ndjson.gz` | `4f42d5da…be8ecd8a`                                    | 276 events, 0 gaps                                                                                                                                                                                                                                                                                 |
+| `data/production/kalshi-2026-09-14.ndjson.gz`                         | `ae55be58…7852bcb2`                                    | Two unmarked process runs (a `YOUR-OPEN-TICKER` placeholder run, then `T76999.99`). Replayed as one session with both tickers: 1,577 events, final `T76999.99` seq 1577. The placeholder's one-sided snapshot produced the same `snapshot missing side` parse error the phase 2 parser raises live |
 
 ### 2.6 Pacing
 
-Session A at `--pace realtime` ([`session-a/replay-realtime.txt`](phase-3-evidence/session-a/replay-realtime.txt)):
+Session A at `--pace realtime` (`[session-a/replay-realtime.txt](phase-3-evidence/session-a/replay-realtime.txt)`):
 `real 179.66` s, against 179,643 ms from the first event-bearing record (the first snapshot)
 to the last record. Pacing anchors on the first yielded event; the session marker and ack
 312 ms earlier yield nothing. The digest was identical to live (`verify OK`, `diff` empty).
@@ -211,13 +210,14 @@ test checks elapsed ≥ 300 ms for records 300 ms apart, max < 300 ms, and equal
 
 ## 3. What was built
 
-**Clock (`src/clock.rs`).** `trait Clock: Send + Sync { fn now_ms(&self) -> u64 }`.
+**Clock (**`src/clock.rs`**).** `trait Clock: Send + Sync { fn now_ms(&self) -> u64 }`.
 `WallClock` is the only wall-clock read in the crate. `ReplayClock` is a shared
 `Arc<AtomicU64>` advanced with `fetch_max`, so it never moves backwards.
 `ReplayFeed` advances it to a record's `received_at_ms` before yielding that record's
 events.
 
 The clock is injected into:
+
 - `BookStore::new(venue, tickers, clock)`: `updated_at_ms` now comes from the clock, not from the event's venue `ts_ms`.
 - `KalshiFeed::start`: receipt time.
 - `kalshi::connect`: the auth signing timestamp.
@@ -230,18 +230,19 @@ max 3,724 ms), which is why venue time must stay out of the replay clock. The te
 `no_wall_clock_reads_outside_clock_module` scans `src/` for `Utc::now`, `Local::now`,
 `SystemTime`, and `UNIX_EPOCH` outside `clock.rs`.
 
-**Control envelopes (`src/record.rs`).** `kind: "control"` is reserved. `Recorder::write`
+**Control envelopes (**`src/record.rs`**).** `kind: "control"` is reserved. `Recorder::write`
 rejects it, and only `write_control` produces it. `raw` holds
 `{"event": "session_started" | "disconnected" | "reconnected" | "resubscribed", ...}`.
 Parse-time distinction is by envelope `kind`: venue text shaped like a control object stays
 venue text (tested). The `Record` struct shape is unchanged, so old files and old readers
 still parse. `KalshiFeed` writes:
+
 - `disconnected`: immediately before each `Disconnected` send, on both emitting paths.
 - `resubscribed`: immediately before the `Resubscribed` sends.
 - `reconnected`: after a later handshake succeeds.
 - `session_started`: once in `start`.
 
-**ReplayFeed (`src/feed/replay.rs`).** It streams `read_records` (MultiGzDecoder) and
+**ReplayFeed (**`src/feed/replay.rs`**).** It streams `read_records` (MultiGzDecoder) and
 implements `Feed`. `text` records go to `kalshi::Parser::parse(raw, received_at_ms)`, the
 same call the live worker makes. Binary, ping, pong, and close kinds count as received and
 are not parsed, as in live. Unknown kinds are an error. Control envelopes yield
@@ -251,17 +252,17 @@ are not parsed, as in live. Unknown kinds are an error. Control envelopes yield
 anything is yielded. A replay error ends the stream, and `finish()` returns it. The CLI
 then fails before printing a digest.
 
-**Pacing.** `Pace::Max` (default) or `Pace::Realtime`. Realtime uses `sleep_until(anchor +
-(received - first_received))`, so sleep overshoot does not accumulate.
+**Pacing.** `Pace::Max` (default) or `Pace::Realtime`. Realtime uses `sleep_until(anchor + (received - first_received))`, so sleep overshoot does not accumulate.
 
-**Verification (`src/verify.rs`, CLI `replay --verify`).**
+**Verification (**`src/verify.rs`**, CLI** `replay --verify`**).**
+
 - `GapLog::apply(&mut store, &event)` is the single apply step used by both `dump` and `replay`. It logs `gap`, `disconnected`, `resubscribed`, and `resynced` (a snapshot applied to a `Resyncing` book), keyed by 1-based event position.
 - Per-contract hash: SHA-256 of `ticker=… state=… seq=… yes=p:s,… no=p:s,…` (nonzero levels of both wire sides).
 - Gap hash: SHA-256 of the LF-terminated entries.
 - No timestamps enter either hash (tested by shifting every receipt time by 1 h).
 - Expectations come from `--expect-file` (a `--digest-out` file) or from `--expect-book TICKER=SHA256` and `--expect-gaps SHA256`. Every replayed contract and the gap log must be covered.
 
-**Live shutdown fidelity (`KalshiFeed::stop`).** Previously, shutdown cancelled the worker
+**Live shutdown fidelity (**`KalshiFeed::stop`**).** Previously, shutdown cancelled the worker
 future. A frame could be recorded while its event was never delivered, and events queued in
 the channel were dropped, so a live run's final state could differ from its own recording.
 The worker now observes stop only inside its `select!` loops. Record-then-send is never
@@ -274,8 +275,7 @@ Session D exposed two phase 2 defects on production data. Both are outside this 
 (`src/book.rs` refactors and parser changes were excluded) and are left for a follow-up.
 
 1. **One-sided snapshots are rejected.** For deep in- and out-of-the-money strikes, Kalshi
-   omits the empty side's key entirely: recorded snapshot keys are `['market_id',
-   'market_ticker', 'yes_dollars_fp']`. The phase 2 parser treats a missing key as a
+   omits the empty side's key entirely: recorded snapshot keys are `['market_id',  'market_ticker', 'yes_dollars_fp']`. The phase 2 parser treats a missing key as a
    schema error (`snapshot missing side`). That was a deliberate choice, but live data
    contradicts it. Session D logged 11,654 such rejections.
 2. **A rejected sequenced message causes a false gap and a reconnect storm.** The rejected
@@ -299,9 +299,8 @@ Session D exposed two phase 2 defects on production data. Both are outside this 
   was observed** in about 30 minutes of recording. If the criterion requires one, carry
   it as a waiver until the pending hour-long endurance session captures one.
 - **Missing ground-truth document.** `docs/phase-2-summary.md` does not exist (see the note at the top).
-- **`exit 145` in the B, C, and D timelines** is zsh's `wait` reporting the earlier
-  SIGSTOP state change (128 + 17). Each dump completed normally: `dump finished and gzip
-  flushed` is logged, and the digest was written.
+- `exit 145` **in the B, C, and D timelines** is zsh's `wait` reporting the earlier
+  SIGSTOP state change (128 + 17). Each dump completed normally: `dump finished and gzip flushed` is logged, and the digest was written.
 - **Monotonic instants.** `tokio::time::Instant::now()` remains in `feed/kalshi.rs`
   (existing socket deadlines) and in the realtime pacing anchor in `feed/replay.rs`. Both
   schedule sleeps and never produce a timestamp, event field, book field, or hashed value.
@@ -314,7 +313,7 @@ Session D exposed two phase 2 defects on production data. Both are outside this 
   - Clock injection into `rest.rs` and `probe.rs`: task 1's no-global-time rule.
   - The disconnect-session fixture (66 KB).
   - Short status edits to README.md, ARCHITECTURE.md §4.1/§4.7, PLAN.md, and tests/fixtures/README.md.
-- **`src/book.rs`** changed only to hold `Arc<dyn Clock>`, take it in `new`, and pass
+- `src/book.rs` changed only to hold `Arc<dyn Clock>`, take it in `new`, and pass
   `clock.now_ms()` as the update time. `tests/book.rs` changed only to pass a clock.
 - **New dependencies: none.** `Cargo.toml` and `Cargo.lock` are unchanged. Hashing uses
   the existing `sha2` crate.

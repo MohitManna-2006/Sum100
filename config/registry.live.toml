@@ -1,0 +1,64 @@
+# Current production ladder for end-to-end dashboard verification.
+# This event is time-sensitive; refresh it with the `markets --prod` command.
+
+[[event]]
+id = "btc-2026-09-20-17"
+description = "Bitcoin price at 2026-09-20 17:00 ET"
+resolves_at = "2026-09-20T21:00:00Z"
+resolution_source = "Kalshi BTC daily settlement"
+resolution_rules_hash = 0
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T81249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP2017-T81499.99" }]
+
+[[event.group]]
+type = "monotone"
+members = [
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T79999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T80999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T81249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP2017-T81499.99" },
+]

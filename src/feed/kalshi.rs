@@ -108,11 +108,12 @@ pub async fn connect(
         "KALSHI-ACCESS-SIGNATURE",
         HeaderValue::from_str(&sign(&credentials.key, timestamp, "GET", WS_PATH)?)?,
     );
-    let (mut socket, _) = tokio::time::timeout(
+    let connect_result = tokio::time::timeout(
         Duration::from_secs(15),
         tokio_tungstenite::connect_async(request),
     )
-    .await??;
+    .await;
+    let (mut socket, _) = connect_result??;
     socket.send(Message::Text(serde_json::json!({"id":1,"cmd":"subscribe","params":{"channels":channels,"market_tickers":tickers}}).to_string().into())).await?;
     tracing::info!(
         url = env.ws_url(),

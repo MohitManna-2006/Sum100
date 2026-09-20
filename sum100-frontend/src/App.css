@@ -73,6 +73,12 @@
   outline: none;
 }
 
+.liveRegion[inert] {
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}
+
 .footer {
   display: flex;
   min-height: 40px;
@@ -98,6 +104,10 @@
   background: var(--color-accent-gain);
   border-radius: 50%;
   content: "";
+}
+
+.syncOffline::before {
+  background: var(--color-accent-loss);
 }
 
 .booting .content > section > * {
