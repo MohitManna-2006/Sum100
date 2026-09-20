@@ -39,7 +39,7 @@ impl FeeModel for KalshiFees {
 ///
 /// Rates are the venue's published figures, held in basis points so the fee
 /// stays integer arithmetic. Makers are never charged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FeeCategory {
     Crypto,
     Sports,
@@ -95,8 +95,13 @@ pub struct PolymarketFees {
 impl PolymarketFees {
     /// Record the category a market charges, as discovery learns it.
     pub fn register(&mut self, contract: ContractId, fee_type: &str) {
-        self.by_contract
-            .insert(contract, FeeCategory::from_fee_type(fee_type));
+        self.register_category(contract, FeeCategory::from_fee_type(fee_type));
+    }
+
+    /// Record a category already decided, for a caller that read more than the
+    /// `feeType` string — whether fees are enabled at all, for instance.
+    pub fn register_category(&mut self, contract: ContractId, category: FeeCategory) {
+        self.by_contract.insert(contract, category);
     }
 
     /// The category charged on this contract, or the conservative default.

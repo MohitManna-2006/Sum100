@@ -817,7 +817,7 @@ impl Registry {
 
         let mut skipped_unbound = 0usize;
         for group in &inferred {
-            let Some(relation) = to_relation(&registry.contracts, group) else {
+            let Some(relation) = to_relation(&registry.contracts, Venue::Kalshi, group) else {
                 skipped_unbound += 1;
                 continue;
             };

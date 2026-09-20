@@ -31,10 +31,11 @@
 
 use crate::{
     feed::rest::{Event, Market, Rest},
+    fees::{FeeCategory, PolymarketFees},
     registry::Relation,
     types::{ContractId, Contracts, Venue},
 };
-use anyhow::Context;
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -446,11 +447,11 @@ fn ladder_order(markets: &[&RawMarket]) -> Option<Vec<String>> {
 ///
 /// Returns `None` when a ticker is missing from the contract table, which means
 /// the market was filtered out of the universe after inference ran.
-pub fn to_relation(contracts: &Contracts, group: &InferredGroup) -> Option<Relation> {
+pub fn to_relation(contracts: &Contracts, venue: Venue, group: &InferredGroup) -> Option<Relation> {
     let ids: Vec<ContractId> = group
         .tickers
         .iter()
-        .map(|ticker| contracts.get(Venue::Kalshi, ticker))
+        .map(|ticker| contracts.get(venue, ticker))
         .collect::<Option<Vec<_>>>()?;
     match group.relation_kind {
         InferredKind::Complement => ids.first().map(|contract| Relation::Complement {
@@ -968,4 +969,192 @@ mod tests {
         server.await.unwrap();
         std::fs::remove_dir_all(&dir).ok();
     }
+}
+
+// ------------------------------------------------------------------ Polymarket
+
+/// A Polymarket market as discovery sees it.
+///
+/// One market is one engine contract, identified by its yes token. The no token
+/// is the same order book mirrored — an ask at `p` on one side is a bid at
+/// `100 - p` on the other, at the same size — so carrying both would double
+/// every book and produce a "group" that is coherent by construction and can
+/// never signal. See [`crate::feed::polymarket`] for the evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolymarketMarket {
+    pub yes_token: String,
+    pub no_token: String,
+    pub question: String,
+    pub tick_size: f64,
+    /// Gamma's `feeType`, absent when the market has no schedule attached.
+    pub fee_type: Option<String>,
+    pub fees_enabled: bool,
+    /// ISO 8601, as the venue publishes it.
+    pub ends_at: Option<String>,
+}
+
+impl PolymarketMarket {
+    /// What this market charges a taker.
+    ///
+    /// `feesEnabled` is authoritative for *whether* there is a fee; `feeType`
+    /// only says which schedule. A market with fees on but no named schedule is
+    /// an unknown, and an unknown fee is read as the dearest one rather than as
+    /// free, on the same reasoning as [`FeeCategory::from_fee_type`].
+    pub fn fee_category(&self) -> FeeCategory {
+        if !self.fees_enabled {
+            return FeeCategory::Zero;
+        }
+        match self.fee_type.as_deref() {
+            Some(fee_type) => FeeCategory::from_fee_type(fee_type),
+            None => FeeCategory::Crypto,
+        }
+    }
+
+    /// Whether this engine can represent the market's prices.
+    ///
+    /// A finer tick cannot be held in a book indexed by whole cents, and
+    /// rounding one into range would quote a price nobody made.
+    pub fn tick_is_representable(&self) -> bool {
+        (self.tick_size - 0.01).abs() < 1e-9
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GammaMarket {
+    #[serde(default)]
+    question: String,
+    #[serde(default)]
+    clob_token_ids: Option<String>,
+    #[serde(default)]
+    order_price_min_tick_size: Option<f64>,
+    #[serde(default)]
+    fee_type: Option<String>,
+    #[serde(default)]
+    fees_enabled: bool,
+    #[serde(default)]
+    closed: bool,
+    #[serde(default)]
+    accepting_orders: bool,
+    #[serde(default)]
+    end_date: Option<String>,
+}
+
+/// Reads the market catalogue from Gamma.
+///
+/// Public metadata: no credentials, and nothing here can place an order.
+pub struct PolymarketDiscovery {
+    base_url: String,
+    client: reqwest::Client,
+}
+
+impl PolymarketDiscovery {
+    pub fn new(base_url: impl Into<String>) -> Result<Self> {
+        Ok(Self {
+            base_url: base_url.into().trim_end_matches('/').to_owned(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
+                .build()?,
+        })
+    }
+
+    /// One page of markets this engine could trade.
+    ///
+    /// A market that does not parse is skipped rather than failing the page.
+    /// The catalogue is large and partly historical, and one entry missing a
+    /// field is not a reason to discover nothing.
+    pub async fn fetch_page(&self, limit: usize, offset: usize) -> Result<Vec<PolymarketMarket>> {
+        let url = format!(
+            "{}/markets?limit={limit}&offset={offset}&closed=false&order=volume24hr&ascending=false",
+            self.base_url
+        );
+        let response = self.client.get(&url).send().await?;
+        ensure!(
+            response.status().is_success(),
+            "gamma returned {} for {url}",
+            response.status()
+        );
+        let raw: Vec<GammaMarket> = response.json().await?;
+        Ok(raw.iter().filter_map(Self::market).collect())
+    }
+
+    fn market(raw: &GammaMarket) -> Option<PolymarketMarket> {
+        if raw.closed || !raw.accepting_orders {
+            return None;
+        }
+        // Two tokens, and the array arrives as a JSON string inside the JSON.
+        let encoded = raw.clob_token_ids.as_deref()?;
+        let tokens: Vec<String> = serde_json::from_str(encoded).ok()?;
+        let [yes_token, no_token] = <[String; 2]>::try_from(tokens).ok()?;
+        Some(PolymarketMarket {
+            yes_token,
+            no_token,
+            question: raw.question.clone(),
+            tick_size: raw.order_price_min_tick_size?,
+            fee_type: raw.fee_type.clone(),
+            fees_enabled: raw.fees_enabled,
+            ends_at: raw.end_date.clone(),
+        })
+    }
+
+    /// Every tradeable market this engine can represent, most active first.
+    ///
+    /// Stops at `max_markets` rather than walking the whole venue: the
+    /// catalogue runs to thousands, and subscribing to all of them is a
+    /// feed-capacity decision rather than a discovery one.
+    pub async fn fetch_representable(&self, max_markets: usize) -> Result<Vec<PolymarketMarket>> {
+        const PAGE: usize = 100;
+        let mut found = Vec::new();
+        let mut offset = 0;
+        while found.len() < max_markets {
+            let page = self.fetch_page(PAGE, offset).await?;
+            if page.is_empty() {
+                break;
+            }
+            found.extend(
+                page.into_iter()
+                    .filter(PolymarketMarket::tick_is_representable),
+            );
+            offset += PAGE;
+        }
+        found.truncate(max_markets);
+        Ok(found)
+    }
+}
+
+/// One complement group per market: a binary market owes a dollar across its
+/// own two outcomes, which holds whatever else the market turns out to be.
+///
+/// Not an exhaustive pair over the two tokens. Those are the same book seen
+/// from both sides, so such a group sums to exactly a dollar by construction
+/// and could never report an incoherence.
+pub fn polymarket_complement_groups(markets: &[PolymarketMarket]) -> Vec<InferredGroup> {
+    markets
+        .iter()
+        .map(|market| InferredGroup {
+            relation_kind: InferredKind::Complement,
+            tickers: vec![market.yes_token.clone()],
+            event_ticker: market.yes_token.clone(),
+        })
+        .collect()
+}
+
+/// Record what each market charges, against the contract its token interned to.
+///
+/// Returns how many were registered. A market whose token this engine has not
+/// interned is skipped, and keeps paying the conservative default until it is.
+pub fn register_polymarket_fees(
+    markets: &[PolymarketMarket],
+    contracts: &Contracts,
+    fees: &mut PolymarketFees,
+) -> usize {
+    let mut registered = 0;
+    for market in markets {
+        let Some(contract) = contracts.get(Venue::Polymarket, &market.yes_token) else {
+            continue;
+        };
+        fees.register_category(contract, market.fee_category());
+        registered += 1;
+    }
+    registered
 }
