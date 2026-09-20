@@ -70,6 +70,13 @@ pub trait Feed: Send {
     /// two venues happen to be busy at once.
     fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>>;
 
+    /// Ask the feed to stop at the next frame boundary.
+    ///
+    /// Events already recorded still arrive, so a caller drains with
+    /// [`Feed::next`] until `None` and ends up having applied exactly the
+    /// stream a replay of the recording will produce.
+    fn stop(&self) {}
+
     /// The venue this feed carries, or `None` when it carries several.
     fn venue(&self) -> Option<Venue> {
         None

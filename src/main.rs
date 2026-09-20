@@ -12,12 +12,16 @@ use sum100::{
     book::{Applied, BookStore},
     clock::{Clock, ReplayClock, WallClock},
     config::Config,
-    discovery::{DiscoveryCache, KalshiDiscovery, Universe, infer_groups},
+    discovery::{
+        DiscoveryCache, KalshiDiscovery, PolymarketDiscovery, Universe, infer_groups,
+        register_polymarket_fees,
+    },
     engine::{Engine, EngineConfig, EngineState, SignalLog},
     exec::{OrderClient, kalshi::KalshiOrderClient, paper::PaperOrderClient},
     feed::{
         Feed,
         kalshi::{self, Credentials, Environment, KalshiFeed},
+        merged::MergedFeed,
         polymarket::PolymarketFeed,
         replay::{Pace, ReplayFeed, ReplayOptions},
         rest::Rest,
@@ -449,7 +453,9 @@ async fn main() -> Result<()> {
                 // token id, which is what `--tickers` carries for this venue.
                 VenueArg::Polymarket => {
                     let recorder = Recorder::new(dir, Venue::Polymarket)?;
-                    let mut feed = PolymarketFeed::start(tickers, recorder, Arc::new(WallClock))?;
+                    let subscriptions: [(Venue, &[String]); 1] = [(Venue::Polymarket, &tickers)];
+                    let mut feed =
+                        PolymarketFeed::start(&subscriptions, recorder, Arc::new(WallClock))?;
                     drain_until_deadline(&mut feed, seconds).await;
                     feed.shutdown().await?
                 }
@@ -813,6 +819,37 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Fetch the Polymarket catalogue and fold it into the registry and the fees.
+///
+/// Returns how many markets were added. Runs before the book store is built,
+/// because extending the registry is what assigns their contract ids.
+async fn discover_polymarket(
+    config: &Config,
+    registry: &mut Registry,
+    fees: &mut sum100::fees::FeeModels,
+) -> Result<usize> {
+    let base = config
+        .venues
+        .polymarket
+        .metadata_url
+        .as_deref()
+        .context("venues.polymarket.metadata_url must be set to discover")?;
+    let discovery = PolymarketDiscovery::new(base)?;
+    let markets: Vec<_> = discovery
+        .fetch_representable(config.discovery.max_pages.max(1))
+        .await?;
+    let added = registry.extend_with_polymarket(&markets)?;
+    // After extending, so every token has an id to register against.
+    let registered = register_polymarket_fees(&markets, registry.contracts(), &mut fees.polymarket);
+    tracing::info!(
+        discovered = markets.len(),
+        added,
+        registered,
+        "polymarket catalogue read"
+    );
+    Ok(added)
+}
+
 /// Read events until the deadline, Ctrl-C, or the feed closing.
 ///
 /// Recording only needs the bytes on disk, which the feed's worker writes
@@ -867,7 +904,7 @@ async fn run_engine(args: EngineRun) -> Result<()> {
     );
     let config_from_file = Config::load(&args.config)?;
     let auto_discover = args.auto_discover || config_from_file.discovery.auto_discover_on_startup;
-    let (config, registry) = if auto_discover {
+    let (config, mut registry) = if auto_discover {
         let config = config_from_file;
         ensure!(
             config.discovery.enabled,
@@ -886,9 +923,25 @@ async fn run_engine(args: EngineRun) -> Result<()> {
     } else {
         load_registry(&args.config, args.registry.as_deref())?
     };
+    // Polymarket discovery runs before anything reads the registry's ticker
+    // lists: extending it assigns contract ids, and the book store has to
+    // intern exactly the same identifiers in the same order.
+    let mut fees = config.fee_models();
+    if args.live && config.venues.polymarket.enabled {
+        match discover_polymarket(&config, &mut registry, &mut fees).await {
+            Ok(added) => tracing::info!(markets = added, "polymarket markets registered"),
+            // A venue that cannot be reached is one this run does without. The
+            // Kalshi side is unaffected, and a half-registered Polymarket would
+            // leave books nothing ever feeds.
+            Err(error) => {
+                tracing::warn!(%error, "polymarket discovery failed; continuing without it")
+            }
+        }
+    }
+
     let tickers = registry.tickers(Venue::Kalshi).to_vec();
     ensure!(!tickers.is_empty(), "registry defines no Kalshi contracts");
-    let fees = config.fee_models();
+    let polymarket_tokens = registry.tickers(Venue::Polymarket).to_vec();
 
     let starting_capital = args.capital.unwrap_or(config.risk.starting_capital_cents);
     let daily_loss_limit = args
@@ -998,15 +1051,42 @@ async fn run_engine(args: EngineRun) -> Result<()> {
         None => {
             let env = environment(args.prod);
             let clock: Arc<dyn Clock> = Arc::new(WallClock);
-            let recorder = Recorder::new(args.out.join(env.name()), Venue::Kalshi)?;
-            let store = BookStore::new(Venue::Kalshi, &tickers, clock.clone())?;
+            let dir = args.out.join(env.name());
+            // Interned Kalshi first, then Polymarket, which is the order the
+            // registry assigned ids in.
+            // One interning order, shared by the store and every feed's parser.
+            let subscriptions: [(Venue, &[String]); 2] = [
+                (Venue::Kalshi, &tickers),
+                (Venue::Polymarket, &polymarket_tokens),
+            ];
+            let store = BookStore::multi_venue(&subscriptions, clock.clone())?;
             let portfolio = Portfolio::new(starting_capital, daily_loss_limit, clock.now_ms());
             let client: Box<dyn OrderClient> = if live_orders {
                 Box::new(KalshiOrderClient::new(env, clock.clone())?)
             } else {
                 Box::new(PaperOrderClient::new(fees.clone()))
             };
-            let mut feed = KalshiFeed::start(env, tickers.clone(), recorder, clock.clone())?;
+            let mut venues: Vec<Box<dyn Feed>> = vec![Box::new(KalshiFeed::start(
+                env,
+                tickers.clone(),
+                Recorder::new(&dir, Venue::Kalshi)?,
+                clock.clone(),
+            )?)];
+            if !polymarket_tokens.is_empty() {
+                // Its own recorder, so each venue's bytes land in its own daily
+                // file and either can be replayed on its own.
+                venues.push(Box::new(PolymarketFeed::start(
+                    &subscriptions,
+                    Recorder::new(&dir, Venue::Polymarket)?,
+                    clock.clone(),
+                )?));
+            }
+            tracing::info!(
+                kalshi = tickers.len(),
+                polymarket = polymarket_tokens.len(),
+                "subscribing"
+            );
+            let mut feed = MergedFeed::new(venues);
             let mut engine = Engine::new(
                 registry,
                 store,
@@ -1035,8 +1115,9 @@ async fn run_engine(args: EngineRun) -> Result<()> {
             while let Some(event) = feed.next().await {
                 engine.step(&event);
             }
-            let metrics = feed.shutdown().await?;
-            tracing::info!(?metrics, "live run finished and gzip flushed");
+            for (venue, metrics) in feed.metrics_by_venue() {
+                tracing::info!(?venue, ?metrics, "live run finished");
+            }
             engine
         }
     };

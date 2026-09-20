@@ -80,6 +80,12 @@ impl Feed for MergedFeed {
         Box::pin(self.next_event())
     }
 
+    fn stop(&self) {
+        for feed in &self.feeds {
+            feed.stop();
+        }
+    }
+
     /// Pass the request down; each child answers only for its own venue.
     fn request_resync(&self, venue: Venue) {
         for feed in &self.feeds {

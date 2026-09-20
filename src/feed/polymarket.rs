@@ -181,16 +181,30 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// A parser for a run that carries only this venue.
     pub fn new(tokens: &[String]) -> Result<Self> {
-        let venue = Venue::Polymarket;
+        Self::across(&[(Venue::Polymarket, tokens)])
+    }
+
+    /// A parser whose contract ids agree with the rest of the engine.
+    ///
+    /// Ids are positional, so every venue in the run has to be interned here in
+    /// the same order the book store and registry used — including venues this
+    /// parser will never resolve a payload for. Interning only its own tokens
+    /// would number them from zero and quietly address another venue's books:
+    /// a Polymarket level update would land on a Kalshi contract, cross it, and
+    /// read out as a complement arbitrage that does not exist.
+    pub fn across(subscriptions: &[(Venue, &[String])]) -> Result<Self> {
         let mut contracts = Contracts::default();
-        for token in tokens {
-            contracts.intern(venue, token)?;
+        for (venue, tickers) in subscriptions {
+            for ticker in *tickers {
+                contracts.intern(*venue, ticker)?;
+            }
         }
         Ok(Self {
             contracts,
             metrics: Metrics::default(),
-            venue,
+            venue: Venue::Polymarket,
         })
     }
 
@@ -358,6 +372,10 @@ impl Feed for PolymarketFeed {
         Box::pin(self.events.recv())
     }
 
+    fn stop(&self) {
+        PolymarketFeed::stop(self);
+    }
+
     fn venue(&self) -> Option<Venue> {
         Some(Venue::Polymarket)
     }
@@ -374,16 +392,24 @@ impl Feed for PolymarketFeed {
 }
 
 impl PolymarketFeed {
+    /// `subscriptions` is every venue in the run, in interning order, so this
+    /// feed's contract ids agree with the book store's. The tokens this feed
+    /// subscribes to are the Polymarket entry.
     pub fn start(
-        tokens: Vec<String>,
+        subscriptions: &[(Venue, &[String])],
         mut recorder: Recorder,
         clock: Arc<dyn Clock>,
     ) -> Result<Self> {
+        let tokens: Vec<String> = subscriptions
+            .iter()
+            .filter(|(venue, _)| *venue == Venue::Polymarket)
+            .flat_map(|(_, tokens)| tokens.iter().cloned())
+            .collect();
         ensure!(
             !tokens.is_empty() && tokens.iter().all(|t| !t.trim().is_empty()),
             "at least one nonempty market token is required"
         );
-        let mut parser = Parser::new(&tokens)?;
+        let mut parser = Parser::across(subscriptions)?;
         parser.metrics.bytes_recorded += recorder.write_control(
             clock.now_ms(),
             &Control::SessionStarted {

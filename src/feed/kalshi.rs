@@ -317,6 +317,10 @@ impl Feed for KalshiFeed {
         Box::pin(self.events.recv())
     }
 
+    fn stop(&self) {
+        KalshiFeed::stop(self);
+    }
+
     fn venue(&self) -> Option<Venue> {
         Some(Venue::Kalshi)
     }

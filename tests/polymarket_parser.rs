@@ -378,3 +378,50 @@ fn the_recorded_session_drives_a_book_store_to_a_live_book() {
     assert!((0..=100).contains(&best_bid.price));
     assert!((0..=100).contains(&best_ask.price));
 }
+
+/// Contract ids are positional, so every feed in a run must intern every
+/// venue's identifiers in the same order the book store did.
+///
+/// A parser that interned only its own tokens would number them from zero and
+/// address another venue's books: a Polymarket level update would land on a
+/// Kalshi contract, cross it, and read out as a complement arbitrage that does
+/// not exist. That is not hypothetical — it produced 4,525 false opportunities
+/// and 1,051 crossed books in a live run before this was pinned.
+#[test]
+fn a_parser_agrees_with_a_multi_venue_book_store_on_ids() {
+    use std::sync::Arc;
+    use sum100::{book::BookStore, clock::ReplayClock, types::ContractId};
+
+    let kalshi: Vec<String> = vec!["KXA".into(), "KXB".into(), "KXC".into()];
+    let poly: Vec<String> = vec![YES.to_owned(), NO.to_owned()];
+    let subscriptions: [(Venue, &[String]); 2] =
+        [(Venue::Kalshi, &kalshi), (Venue::Polymarket, &poly)];
+
+    let store = BookStore::multi_venue(&subscriptions, Arc::new(ReplayClock::new())).unwrap();
+    let parser = Parser::across(&subscriptions).unwrap();
+
+    // The Polymarket tokens come after the Kalshi ones, not from zero.
+    let yes_id = parser.contracts.get(Venue::Polymarket, YES).unwrap();
+    assert_eq!(yes_id, ContractId(3));
+    assert_eq!(
+        parser.contracts.get(Venue::Polymarket, NO).unwrap(),
+        ContractId(4)
+    );
+
+    // And every id the parser can emit resolves to a book of the right venue.
+    for token in &poly {
+        let id = parser.contracts.get(Venue::Polymarket, token).unwrap();
+        let book = store.get(id).expect("a book for every subscribed token");
+        assert_eq!(book.venue, Venue::Polymarket);
+        assert_eq!(store.contracts().resolve(id), parser.contracts.resolve(id));
+    }
+    // The Kalshi slots belong to Kalshi, which is what was being overwritten.
+    for (index, ticker) in kalshi.iter().enumerate() {
+        let id = ContractId(index as u32);
+        assert_eq!(store.get(id).unwrap().venue, Venue::Kalshi);
+        assert_eq!(
+            store.contracts().resolve(id),
+            Some(&(Venue::Kalshi, ticker.clone()))
+        );
+    }
+}

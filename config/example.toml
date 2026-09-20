@@ -23,10 +23,14 @@ fee_multiplier = 1.0
 cache_dir = ".cache/kalshi"
 
 [venues.polymarket]
-# No feed and no fee model yet; phase 7. Registry members on this venue still
-# load, so a cross-venue group is visible and skipped for a stated reason.
+# Enabled, `scan --live` reads the Gamma catalogue at startup, registers every
+# market it can represent as a complement group, and subscribes to them beside
+# Kalshi. Markets finer than a one-cent tick are skipped: the book is indexed by
+# whole cents and rounding one in would quote a price nobody made.
 enabled = false
-metadata_url = "https://clob.polymarket.com"
+# The catalogue, not the order book. Discovery reads markets and their fee
+# schedules from here; the feed connects to the CLOB websocket separately.
+metadata_url = "https://gamma-api.polymarket.com"
 cache_dir = ".cache/polymarket"
 
 [registry]
