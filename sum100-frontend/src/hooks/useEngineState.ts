@@ -20,10 +20,13 @@ export function useEngineState() {
   const [error, setError] = useState<string | null>(null)
   const [malformedMessages, setMalformedMessages] = useState(0)
   const [connectionKey, setConnectionKey] = useState(0)
+  const [connectionEnabled, setConnectionEnabled] = useState(true)
   const [latencyHistory, setLatencyHistory] = useState<LatencyTick[]>([])
   const [gapHistory, setGapHistory] = useState<GapTick[]>([])
 
   useEffect(() => {
+    if (!connectionEnabled) return
+
     let disposed = false
     let socket: WebSocket | null = null
     const reconnectTimers = new Set<number>()
@@ -147,12 +150,19 @@ export function useEngineState() {
         socket.close()
       }
     }
-  }, [connectionKey])
+  }, [connectionEnabled, connectionKey])
 
   const reconnect = useCallback(() => {
     setError(null)
     setPhase('connecting')
+    setConnectionEnabled(true)
     setConnectionKey((key) => key + 1)
+  }, [])
+
+  const disconnect = useCallback(() => {
+    setConnectionEnabled(false)
+    setPhase('offline')
+    setError('Engine stopped from this dashboard')
   }, [])
 
   return {
@@ -164,5 +174,6 @@ export function useEngineState() {
     latencyHistory,
     gapHistory,
     reconnect,
+    disconnect,
   }
 }

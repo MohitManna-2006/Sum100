@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import {
   adaptHealth,
   adaptOpportunity,
   rejectionMetrics,
 } from './api/adapters'
+import {
+  getEngineControlStatus,
+  startEngine,
+  stopEngine,
+} from './api/engineControl'
 import type { HealthSnapshot } from './api/types'
 import { ConnectionState } from './components/ConnectionState'
 import { Header } from './components/Header'
@@ -30,6 +35,11 @@ const emptyHealth: HealthSnapshot = {
 
 function App() {
   const [booting, setBooting] = useState(true)
+  const [controlAction, setControlAction] = useState<
+    'starting' | 'stopping' | null
+  >(null)
+  const [controlError, setControlError] = useState<string | null>(null)
+  const [managedEngine, setManagedEngine] = useState(false)
   const {
     state,
     phase,
@@ -39,12 +49,68 @@ function App() {
     latencyHistory,
     gapHistory,
     reconnect,
+    disconnect,
   } = useEngineState()
 
   useEffect(() => {
     const timer = window.setTimeout(() => setBooting(false), 500)
     return () => window.clearTimeout(timer)
   }, [])
+
+  useEffect(() => {
+    let active = true
+    void getEngineControlStatus()
+      .then((status) => {
+        if (active) setManagedEngine(status.managed)
+      })
+      .catch(() => {
+        // Production deployments may not expose the local development
+        // controller; ordinary WebSocket reconnect behavior still works.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const reconnectEngine = useCallback(async () => {
+    if (controlAction) return
+    setControlAction('starting')
+    setControlError(null)
+
+    try {
+      const status = await startEngine()
+      setManagedEngine(status.managed)
+    } catch (controlFailure) {
+      setControlError(
+        controlFailure instanceof Error
+          ? controlFailure.message
+          : String(controlFailure),
+      )
+    } finally {
+      reconnect()
+      setControlAction(null)
+    }
+  }, [controlAction, reconnect])
+
+  const stopManagedEngine = useCallback(async () => {
+    if (controlAction || !managedEngine) return
+    setControlAction('stopping')
+    setControlError(null)
+
+    try {
+      await stopEngine()
+      setManagedEngine(false)
+      disconnect()
+    } catch (controlFailure) {
+      setControlError(
+        controlFailure instanceof Error
+          ? controlFailure.message
+          : String(controlFailure),
+      )
+    } finally {
+      setControlAction(null)
+    }
+  }, [controlAction, disconnect, managedEngine])
 
   const engineOpportunities = state?.opportunities
   const engineHealth = state?.health
@@ -70,13 +136,17 @@ function App() {
           health={health}
           phase={phase}
           lastUpdate={lastUpdate}
-          onReconnect={reconnect}
+          onReconnect={reconnectEngine}
+          onStop={stopManagedEngine}
+          canStop={managedEngine && connected}
+          controlPending={controlAction}
         />
         {stale ? (
           <ConnectionState
             phase={phase}
-            error={error}
-            onReconnect={reconnect}
+            error={controlError || error}
+            onReconnect={reconnectEngine}
+            reconnectPending={controlAction === 'starting'}
             banner
           />
         ) : null}
@@ -101,8 +171,9 @@ function App() {
             ) : (
               <ConnectionState
                 phase={phase}
-                error={error}
-                onReconnect={reconnect}
+                error={controlError || error}
+                onReconnect={reconnectEngine}
+                reconnectPending={controlAction === 'starting'}
               />
             )}
           </Tabs.Content>
@@ -122,8 +193,9 @@ function App() {
             ) : (
               <ConnectionState
                 phase={phase}
-                error={error}
-                onReconnect={reconnect}
+                error={controlError || error}
+                onReconnect={reconnectEngine}
+                reconnectPending={controlAction === 'starting'}
               />
             )}
           </Tabs.Content>

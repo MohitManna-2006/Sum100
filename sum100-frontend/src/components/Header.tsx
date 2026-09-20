@@ -7,6 +7,9 @@ interface HeaderProps {
   phase: ConnectionPhase
   lastUpdate?: number
   onReconnect: () => void
+  onStop: () => void
+  canStop: boolean
+  controlPending?: 'starting' | 'stopping' | null
 }
 
 export function Header({
@@ -14,6 +17,9 @@ export function Header({
   phase,
   lastUpdate,
   onReconnect,
+  onStop,
+  canStop,
+  controlPending = null,
 }: HeaderProps) {
   const lastUpdateLabel = lastUpdate
     ? new Date(lastUpdate).toLocaleTimeString([], {
@@ -38,8 +44,22 @@ export function Header({
           <span className={`${styles.phase} ${styles[phase]}`}>{phase}</span>
           <span className={styles.lastUpdate}>Update {lastUpdateLabel}</span>
           {phase !== 'connected' ? (
-            <button className={styles.reconnect} type="button" onClick={onReconnect}>
-              Reconnect
+            <button
+              className={styles.reconnect}
+              type="button"
+              onClick={onReconnect}
+              disabled={controlPending !== null}
+            >
+              {controlPending === 'starting' ? 'Starting…' : 'Reconnect'}
+            </button>
+          ) : canStop ? (
+            <button
+              className={styles.reconnect}
+              type="button"
+              onClick={onStop}
+              disabled={controlPending !== null}
+            >
+              {controlPending === 'stopping' ? 'Stopping…' : 'Stop engine'}
             </button>
           ) : null}
         </div>

@@ -52,6 +52,11 @@
   background: var(--color-neutral-1);
 }
 
+.reconnect:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .banner {
   display: flex;
   min-height: 38px;

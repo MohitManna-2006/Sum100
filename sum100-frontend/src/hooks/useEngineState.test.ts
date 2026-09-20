@@ -70,6 +70,24 @@ describe('useEngineState', () => {
     unmount()
   })
 
+  it('stays offline after an intentional stop until reconnect is requested', () => {
+    const { result, unmount } = renderHook(() => useEngineState())
+
+    act(() => MockWebSocket.instances[0].open())
+    act(() => result.current.disconnect())
+
+    expect(result.current.connected).toBe(false)
+    expect(result.current.phase).toBe('offline')
+
+    act(() => vi.advanceTimersByTime(RECONNECT_BASE_MS * 4))
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    act(() => result.current.reconnect())
+    expect(MockWebSocket.instances).toHaveLength(2)
+
+    unmount()
+  })
+
   it('counts malformed messages without dropping the connection', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { result, unmount } = renderHook(() => useEngineState())
