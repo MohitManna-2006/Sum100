@@ -178,16 +178,25 @@ struct Delta {
 pub struct Parser {
     pub contracts: Contracts,
     pub metrics: Metrics,
+    /// The venue whose wire format this parser speaks.
+    ///
+    /// Constant for this type, but read rather than re-asserted by callers that
+    /// build events from it: a parser is the thing that knows which venue a
+    /// payload came from, and a second venue arrives as its own parser with its
+    /// own value here rather than as a flag threaded through the replay path.
+    pub venue: Venue,
 }
 impl Parser {
     pub fn new(tickers: &[String]) -> Result<Self> {
+        let venue = Venue::Kalshi;
         let mut contracts = Contracts::default();
         for ticker in tickers {
-            contracts.intern(Venue::Kalshi, ticker)?;
+            contracts.intern(venue, ticker)?;
         }
         Ok(Self {
             contracts,
             metrics: Metrics::default(),
+            venue,
         })
     }
     pub fn parse(&mut self, raw: &str, receipt: u64) -> Option<FeedEvent> {

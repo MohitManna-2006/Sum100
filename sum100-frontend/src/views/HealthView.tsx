@@ -64,6 +64,38 @@ export function HealthView({ health, latency, gaps, rejections }: HealthViewProp
 
       <HealthStrip health={health} />
 
+      <article className={`${styles.panel} ${styles.widePanel}`}>
+        <header className={styles.panelHeader}>
+          <div>
+            <h3 className={styles.panelTitle}>Venues</h3>
+            <span className={styles.panelNote}>
+              Each feed is its own socket, sequence, and verdict
+            </span>
+          </div>
+          <span className={styles.panelValue}>{health.overall}</span>
+        </header>
+        <div className={styles.rejectionList}>
+          {health.venues.map((venue) => (
+            <div className={styles.rejectionItem} key={venue.venue}>
+              <span className={styles.rejectionLabel}>
+                <span
+                  className={`${styles.legendDot} ${
+                    venue.connected ? styles.gain : venue.subscribed ? styles.loss : styles.info
+                  }`}
+                  aria-hidden="true"
+                />
+                {venue.label}
+              </span>
+              <strong className={styles.rejectionValue}>
+                {venue.subscribed
+                  ? `${venue.state} · ${venue.messagesReceived.toLocaleString()} msg · ${venue.parseErrors} parse errors · ${venue.reconnections} reconnects · p99 ${venue.latencyP99.toFixed(1)} ms`
+                  : 'not subscribed'}
+              </strong>
+            </div>
+          ))}
+        </div>
+      </article>
+
       <div className={styles.metricGrid}>
         <article className={styles.panel}>
           <header className={styles.panelHeader}>

@@ -74,7 +74,7 @@ fn full_fixture_replay_reaches_pinned_final_book() {
     let book = store.get(ContractId(0)).unwrap();
     assert_eq!(book.state, BookState::Live);
     assert_eq!(book.seq, 461);
-    assert_eq!(store.expected_seq(), Some(462));
+    assert_eq!(store.expected_seq(Venue::Kalshi), Some(462));
     assert_eq!(book.best_bid().map(|l| (l.price, l.size)), Some((44, 4294)));
     assert_eq!(book.best_ask().map(|l| (l.price, l.size)), Some((46, 100)));
     assert_eq!(
@@ -148,7 +148,7 @@ fn sequence_gap_marks_resyncing_and_preserves_contents() {
     assert_eq!(book.yes_size_at(41), before_yes);
     assert_eq!(book.no_size_at(55), before_no);
     assert_eq!(store.metrics.sequence_gaps, 1);
-    assert_eq!(store.expected_seq(), None);
+    assert_eq!(store.expected_seq(Venue::Kalshi), None);
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn deltas_dropped_while_resyncing_until_snapshot() {
     assert_eq!(book.seq, 10);
     assert_eq!(book.yes_size_at(41), Some(7));
     assert_eq!(book.yes_size_at(40), Some(0));
-    assert_eq!(store.expected_seq(), Some(11));
+    assert_eq!(store.expected_seq(Venue::Kalshi), Some(11));
 }
 
 #[test]
@@ -381,4 +381,148 @@ fn crossed_book_stays_live_and_is_counted() {
     assert_eq!(book.best_bid().map(|l| l.price), Some(60));
     assert_eq!(book.best_ask().map(|l| l.price), Some(50));
     assert!(store.metrics.crossed_books_observed >= 1);
+}
+
+/// Two venues, two subscriptions, two sequence spaces.
+///
+/// Kalshi and Polymarket number their own streams from their own handshakes, so
+/// a store holding both must not compare one against the other. Before this was
+/// scoped per venue, every alternating message read as a discontinuity.
+fn dual_venue_store() -> BookStore {
+    let kalshi = vec![ticker()];
+    let polymarket = vec!["0xabc".to_owned()];
+    BookStore::multi_venue(
+        &[(Venue::Kalshi, &kalshi), (Venue::Polymarket, &polymarket)],
+        clock(),
+    )
+    .unwrap()
+}
+
+fn snapshot(contract: ContractId, seq: u64) -> FeedEvent {
+    FeedEvent::Snapshot {
+        contract,
+        yes: vec![Level {
+            price: 40,
+            size: 10,
+        }],
+        no: vec![Level {
+            price: 50,
+            size: 20,
+        }],
+        seq,
+        venue_ts_ms: None,
+    }
+}
+
+fn delta(contract: ContractId, seq: u64) -> FeedEvent {
+    FeedEvent::Delta {
+        contract,
+        side: Side::Yes,
+        price: 40,
+        size_delta: 5,
+        seq,
+        venue_ts_ms: 1_000,
+    }
+}
+
+#[test]
+fn interleaved_venues_do_not_read_as_sequence_gaps() {
+    let mut store = dual_venue_store();
+    let (kalshi, polymarket) = (ContractId(0), ContractId(1));
+
+    // Each venue starts its own sequence at 1, and they interleave.
+    assert_eq!(store.apply(&snapshot(kalshi, 1)), Applied::Snapshot(kalshi));
+    assert_eq!(
+        store.apply(&snapshot(polymarket, 1)),
+        Applied::Snapshot(polymarket)
+    );
+    assert_eq!(store.apply(&delta(kalshi, 2)), Applied::Delta(kalshi));
+    assert_eq!(
+        store.apply(&delta(polymarket, 2)),
+        Applied::Delta(polymarket)
+    );
+    assert_eq!(store.apply(&delta(kalshi, 3)), Applied::Delta(kalshi));
+
+    assert_eq!(store.metrics.sequence_gaps, 0);
+    assert_eq!(store.expected_seq(Venue::Kalshi), Some(4));
+    assert_eq!(store.expected_seq(Venue::Polymarket), Some(3));
+}
+
+#[test]
+fn a_gap_on_one_venue_leaves_the_other_live() {
+    let mut store = dual_venue_store();
+    let (kalshi, polymarket) = (ContractId(0), ContractId(1));
+    store.apply(&snapshot(kalshi, 1));
+    store.apply(&snapshot(polymarket, 1));
+
+    // Skip Kalshi seq 2.
+    assert_eq!(
+        store.apply(&delta(kalshi, 3)),
+        Applied::Gap {
+            expected: 2,
+            got: 3
+        }
+    );
+
+    assert_eq!(store.get(kalshi).unwrap().state, BookState::Resyncing);
+    assert_eq!(store.get(polymarket).unwrap().state, BookState::Live);
+    assert_eq!(store.expected_seq(Venue::Kalshi), None);
+    assert_eq!(store.expected_seq(Venue::Polymarket), Some(2));
+
+    // The untouched venue keeps applying its own deltas.
+    assert_eq!(
+        store.apply(&delta(polymarket, 2)),
+        Applied::Delta(polymarket)
+    );
+    assert_eq!(store.metrics.sequence_gaps, 1);
+}
+
+#[test]
+fn a_disconnect_invalidates_only_its_own_venue() {
+    let mut store = dual_venue_store();
+    let (kalshi, polymarket) = (ContractId(0), ContractId(1));
+    store.apply(&snapshot(kalshi, 1));
+    store.apply(&snapshot(polymarket, 1));
+
+    assert_eq!(
+        store.apply(&FeedEvent::Disconnected {
+            venue: Venue::Polymarket
+        }),
+        Applied::Invalidated
+    );
+    assert_eq!(store.get(kalshi).unwrap().state, BookState::Live);
+    assert_eq!(store.get(polymarket).unwrap().state, BookState::Resyncing);
+    assert_eq!(store.expected_seq(Venue::Kalshi), Some(2));
+    assert_eq!(store.expected_seq(Venue::Polymarket), None);
+
+    // A resubscribe names a contract, and only that contract's venue resets.
+    store.apply(&delta(kalshi, 2));
+    assert_eq!(
+        store.apply(&FeedEvent::Resubscribed {
+            contract: polymarket
+        }),
+        Applied::Invalidated
+    );
+    assert_eq!(store.get(kalshi).unwrap().state, BookState::Live);
+    assert_eq!(store.expected_seq(Venue::Kalshi), Some(3));
+}
+
+#[test]
+fn an_event_routes_to_the_venue_that_owns_its_contract() {
+    let store = dual_venue_store();
+    let (kalshi, polymarket) = (ContractId(0), ContractId(1));
+    assert_eq!(store.venue_of(&delta(kalshi, 1)), Some(Venue::Kalshi));
+    assert_eq!(
+        store.venue_of(&snapshot(polymarket, 1)),
+        Some(Venue::Polymarket)
+    );
+    assert_eq!(
+        store.venue_of(&FeedEvent::Resubscribed {
+            contract: polymarket
+        }),
+        Some(Venue::Polymarket)
+    );
+    // A contract this store does not hold belongs to no venue here.
+    assert_eq!(store.venue_of(&delta(ContractId(99), 1)), None);
+    assert_eq!(store.venues(), vec![Venue::Kalshi, Venue::Polymarket]);
 }

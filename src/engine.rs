@@ -35,7 +35,7 @@ use crate::{
     },
     feed::{Feed, FeedEvent},
     fees::FeeModels,
-    health::{HealthMonitor, HealthState},
+    health::{HealthMonitor, HealthState, OverallHealth},
     metrics::Metrics,
     portfolio::{Portfolio, PortfolioSummary, Position, PositionLeg},
     registry::{EventId, GroupId, Registry},
@@ -222,15 +222,36 @@ pub struct EngineState {
     pub risk: RiskStatus,
 }
 
+/// One venue's health, as published.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct HealthStatus {
-    pub kalshi_healthy: bool,
-    pub kalshi_state: HealthState,
+pub struct VenueStatus {
+    pub venue: Venue,
+    pub healthy: bool,
+    pub state: HealthState,
+    /// False when nothing feeds this venue on this run. Reported rather than
+    /// omitted, so the dashboard can show a venue as absent instead of leaving
+    /// a gap the reader has to interpret.
+    pub subscribed: bool,
     pub last_message_age_ms: u64,
     /// The feed's own counters, when it keeps them. `None` means nobody is in a
-    /// position to answer — a feed with no counters, or state built outside a
-    /// run — and is deliberately not the same value as a feed reporting zeros.
+    /// position to answer — an unsubscribed venue, a feed with no counters, or
+    /// state built outside a run — and is deliberately not a feed reporting
+    /// zeros.
     pub feed: Option<Metrics>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HealthStatus {
+    /// Every venue, subscribed or not, in [`Venue::ALL`] order.
+    pub venues: Vec<VenueStatus>,
+    /// The subscribed venues rolled into one verdict.
+    pub overall: OverallHealth,
+}
+
+impl HealthStatus {
+    pub fn venue(&self, venue: Venue) -> Option<&VenueStatus> {
+        self.venues.iter().find(|status| status.venue == venue)
+    }
 }
 
 /// A trade that passed every gate and is ready to place.
@@ -271,6 +292,9 @@ impl<S: OpportunitySink> Engine<S> {
         clock: Arc<dyn Clock>,
         portfolio: Portfolio,
     ) -> Self {
+        // The venues with books are the venues being fed, so the rollup judges
+        // exactly those and treats the rest as absent.
+        let health = HealthMonitor::for_venues(config.max_idle_ms, &book_store.venues());
         Engine {
             registry,
             book_store,
@@ -282,7 +306,7 @@ impl<S: OpportunitySink> Engine<S> {
             resync_pending: false,
             feed_metrics: None,
             portfolio,
-            health: HealthMonitor::new(config.max_idle_ms),
+            health,
             metrics: EngineMetrics::default(),
         }
     }
@@ -311,8 +335,12 @@ impl<S: OpportunitySink> Engine<S> {
         self.metrics.events_received = self.metrics.events_received.saturating_add(1);
         let now_ms = self.clock.now_ms();
         // Health folds in every event, including the ones that dirty nothing:
-        // a disconnect is exactly the event that must stop trading.
-        self.health.apply_feed_event(event, now_ms);
+        // a disconnect is exactly the event that must stop trading. An event for
+        // a contract this store does not hold belongs to no venue, so it is not
+        // evidence about any venue's health.
+        if let Some(venue) = self.book_store.venue_of(event) {
+            self.health.apply_feed_event(event, venue, now_ms);
+        }
         self.portfolio.reset_daily_if_needed(now_ms);
         let (applied, dirty) = self.book_store.apply_and_mark(event);
 
@@ -367,7 +395,7 @@ impl<S: OpportunitySink> Engine<S> {
                 .saturating_add(opportunities.len() as u64);
             tracing::warn!(
                 skipped = opportunities.len(),
-                state = ?self.health.kalshi.state,
+                state = ?self.health.venue(Venue::Kalshi).state,
                 "venue unhealthy; signals not traded"
             );
             return Vec::new();
@@ -617,7 +645,6 @@ impl<S: OpportunitySink> Engine<S> {
 
     pub fn state(&self, latest: &[Signal]) -> EngineState {
         let now_ms = self.clock.now_ms();
-        let kalshi = &self.health.kalshi;
         EngineState {
             timestamp_ms: now_ms,
             contracts: self
@@ -651,10 +678,23 @@ impl<S: OpportunitySink> Engine<S> {
             solver: self.solver.metrics.clone(),
             portfolio: self.portfolio.summary(),
             health: HealthStatus {
-                kalshi_healthy: kalshi.is_healthy(),
-                kalshi_state: kalshi.state,
-                last_message_age_ms: kalshi.idle_ms(now_ms),
-                feed: self.feed_metrics,
+                venues: self
+                    .health
+                    .all()
+                    .iter()
+                    .map(|health| VenueStatus {
+                        venue: health.venue,
+                        healthy: health.is_healthy_at(now_ms, self.health.max_idle_ms),
+                        state: health.state,
+                        subscribed: health.subscribed,
+                        last_message_age_ms: health.idle_ms(now_ms),
+                        // One feed per venue, and only the venue it feeds may
+                        // claim its counters. Attributing them to a venue that
+                        // is not subscribed is how a dead venue reads as busy.
+                        feed: health.subscribed.then_some(self.feed_metrics).flatten(),
+                    })
+                    .collect(),
+                overall: self.health.overall(now_ms),
             },
             risk: self.risk_status(),
         }
@@ -666,8 +706,10 @@ impl<S: OpportunitySink> Engine<S> {
     /// railings rather than only their failures.
     fn risk_status(&self) -> RiskStatus {
         let mut reasons = Vec::new();
-        if !self.health.kalshi.is_healthy() {
-            reasons.push(format!("kalshi {:?}", self.health.kalshi.state).to_lowercase());
+        for health in self.health.all() {
+            if health.subscribed && !health.is_healthy() {
+                reasons.push(format!("{} {:?}", health.venue.name(), health.state).to_lowercase());
+            }
         }
         if !self.portfolio.within_daily_loss_limit() {
             reasons.push("daily loss limit reached".into());

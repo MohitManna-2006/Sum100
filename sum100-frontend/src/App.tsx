@@ -24,6 +24,10 @@ import './App.css'
 
 const emptyHealth: HealthSnapshot = {
   connected: false,
+  overall: 'erroring',
+  // Nothing has been received yet, so no venue can be claimed either way. The
+  // engine names them once a frame arrives.
+  venues: [],
   messagesReceived: 0,
   parseErrors: 0,
   gapCount: 0,

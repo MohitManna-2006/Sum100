@@ -85,7 +85,7 @@ async fn one_sided_snapshots_from_session_d_stay_live_without_false_gaps() {
                 let ticker = &store.contracts().resolve(id).unwrap().1;
                 let book = store.get(id).unwrap();
                 assert_eq!((book.state, book.seq), (BookState::Live, *seq));
-                assert_eq!(store.expected_seq(), Some(seq + 1));
+                assert_eq!(store.expected_seq(Venue::Kalshi), Some(seq + 1));
                 // Empty as applied, before any later delta can add a level.
                 if no_absent.contains(ticker) {
                     assert!(side_is_empty(book, false), "{ticker} no side");
@@ -114,7 +114,7 @@ async fn one_sided_snapshots_from_session_d_stay_live_without_false_gaps() {
     assert_eq!(metrics.parse_errors, 0);
     assert_eq!(metrics.snapshot_sides_absent, 51);
     assert_eq!(last_seq, 153);
-    assert_eq!(store.expected_seq(), Some(154));
+    assert_eq!(store.expected_seq(Venue::Kalshi), Some(154));
     assert_eq!(store.metrics.snapshots_applied, 80);
     assert_eq!(store.metrics.deltas_applied, 73);
     assert_eq!(far_deltas, 70);

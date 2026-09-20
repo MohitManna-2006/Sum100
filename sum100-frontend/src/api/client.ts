@@ -32,16 +32,42 @@ export interface EngineOpportunity {
   reject_reason?: string
 }
 
-export interface EngineHealthMetrics {
+export type EngineVenue = 'kalshi' | 'polymarket'
+export type EngineOverallHealth = 'connected' | 'degraded' | 'erroring'
+export type EngineVenueState =
+  | 'healthy'
+  | 'stale'
+  | 'erroring'
+  | 'disconnected'
+
+export interface EngineVenueHealth {
+  venue: EngineVenue
   connected: boolean
+  /** False when nothing feeds this venue; it is absent, not down. */
+  subscribed: boolean
+  state: EngineVenueState
+  last_message_age_ms: number
+  messages_received: number
+  parse_errors: number
+  reconnections: number
+  latency_ms: EngineLatency
+}
+
+export interface EngineLatency {
+  p50: number
+  p95: number
+  p99: number
+}
+
+export interface EngineHealthMetrics {
+  /** Rolled up over subscribed venues only. */
+  connected: boolean
+  overall: EngineOverallHealth
+  venues: EngineVenueHealth[]
   messages_received: number
   parse_errors: number
   sequence_gaps: number
-  latency_ms: {
-    p50: number
-    p95: number
-    p99: number
-  }
+  latency_ms: EngineLatency
   reconnections: number
 }
 
@@ -120,17 +146,46 @@ function isEngineOpportunity(value: unknown): value is EngineOpportunity {
   )
 }
 
+function isEngineLatency(value: unknown): value is EngineLatency {
+  if (!isRecord(value)) return false
+
+  return (
+    isFiniteNumber(value.p50) &&
+    isFiniteNumber(value.p95) &&
+    isFiniteNumber(value.p99)
+  )
+}
+
+function isEngineVenueHealth(value: unknown): value is EngineVenueHealth {
+  if (!isRecord(value)) return false
+
+  return (
+    (value.venue === 'kalshi' || value.venue === 'polymarket') &&
+    typeof value.connected === 'boolean' &&
+    typeof value.subscribed === 'boolean' &&
+    ['healthy', 'stale', 'erroring', 'disconnected'].includes(
+      String(value.state),
+    ) &&
+    isFiniteNumber(value.last_message_age_ms) &&
+    isFiniteNumber(value.messages_received) &&
+    isFiniteNumber(value.parse_errors) &&
+    isFiniteNumber(value.reconnections) &&
+    isEngineLatency(value.latency_ms)
+  )
+}
+
 function isEngineHealth(value: unknown): value is EngineHealthMetrics {
-  if (!isRecord(value) || !isRecord(value.latency_ms)) return false
+  if (!isRecord(value)) return false
 
   return (
     typeof value.connected === 'boolean' &&
+    ['connected', 'degraded', 'erroring'].includes(String(value.overall)) &&
+    Array.isArray(value.venues) &&
+    value.venues.every(isEngineVenueHealth) &&
     isFiniteNumber(value.messages_received) &&
     isFiniteNumber(value.parse_errors) &&
     isFiniteNumber(value.sequence_gaps) &&
-    isFiniteNumber(value.latency_ms.p50) &&
-    isFiniteNumber(value.latency_ms.p95) &&
-    isFiniteNumber(value.latency_ms.p99) &&
+    isEngineLatency(value.latency_ms) &&
     isFiniteNumber(value.reconnections)
   )
 }

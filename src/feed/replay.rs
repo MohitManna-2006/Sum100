@@ -174,6 +174,11 @@ impl ReplayFeed {
         &self.tickers
     }
 
+    /// The venue this recording came from, which is the one its parser speaks.
+    pub fn venue(&self) -> Venue {
+        self.parser.venue
+    }
+
     /// Advanced to each event's receipt time before the event is yielded.
     pub fn clock(&self) -> ReplayClock {
         self.clock.clone()
@@ -237,7 +242,7 @@ impl ReplayFeed {
         match control {
             Some(Control::SessionStarted { .. } | Control::Reconnected { .. }) => {}
             Some(Control::Disconnected { .. }) => self.pending.push_back(FeedEvent::Disconnected {
-                venue: Venue::Kalshi,
+                venue: self.parser.venue,
             }),
             Some(Control::Resubscribed { tickers }) => {
                 // The live feed counts one reconnection per envelope it writes
@@ -248,7 +253,7 @@ impl ReplayFeed {
                     let contract = self
                         .parser
                         .contracts
-                        .get(Venue::Kalshi, &ticker)
+                        .get(self.parser.venue, &ticker)
                         .with_context(|| {
                             format!("record {}: resubscribed unknown {ticker}", record.sequence)
                         })?;

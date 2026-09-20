@@ -1,9 +1,17 @@
 //! Book store: apply feed events to in-memory books with sequence continuity.
 //!
 //! Sequence numbers are scoped to the venue subscription, not per contract. A
-//! gap on any ticker invalidates every live book on that subscription. The
-//! store never calls back into the feed; on [`Applied::Gap`] the driver must
-//! request a resync.
+//! gap on any ticker invalidates every live book *on that venue*, and no book
+//! on any other: two venues number their own subscriptions from their own
+//! handshakes, so treating the streams as one would read every alternating
+//! message as a discontinuity. The store never calls back into the feed; on
+//! [`Applied::Gap`] the driver must request a resync.
+//!
+//! Books stay in one flat vector indexed by [`ContractId`], which is what makes
+//! a lookup a single index and keeps interning order — and therefore every
+//! pinned digest — identical to the single-venue store this grew from. Only the
+//! sequence expectation and the blast radius of an invalidation are per venue;
+//! each [`Book`] already carries the venue it belongs to.
 //!
 //! `updated_at_ms` comes from the injected [`Clock`] (local time live, recorded
 //! receipt time under replay), never from the venue timestamp on the event.
@@ -11,7 +19,7 @@
 use crate::{
     clock::Clock,
     feed::FeedEvent,
-    types::{Book, BookApplyError, BookState, ContractId, Contracts, Venue},
+    types::{Book, BookApplyError, BookState, ContractId, Contracts, VENUE_COUNT, Venue},
 };
 use std::sync::Arc;
 
@@ -67,8 +75,9 @@ impl BookMetrics {
 pub struct BookStore {
     books: Vec<Book>,
     contracts: Contracts,
-    /// Next expected subscription sequence after the last accepted message.
-    expected_seq: Option<u64>,
+    /// Next expected subscription sequence after the last accepted message, per
+    /// venue. Indexed by [`Venue::index`].
+    expected_seq: [Option<u64>; VENUE_COUNT],
     clock: Arc<dyn Clock>,
     pub metrics: BookMetrics,
 }
@@ -76,19 +85,58 @@ pub struct BookStore {
 impl BookStore {
     /// Intern tickers in the same order as [`crate::feed::kalshi::Parser::new`].
     pub fn new(venue: Venue, tickers: &[String], clock: Arc<dyn Clock>) -> anyhow::Result<Self> {
+        Self::multi_venue(&[(venue, tickers)], clock)
+    }
+
+    /// Build a store spanning several venues.
+    ///
+    /// Subscriptions are interned in the order given, and the caller must pass
+    /// them in the registry's order (every Kalshi member before any Polymarket
+    /// one). Contract ids are positional, so a store interned in a different
+    /// order from the registry that feeds it points every book at the wrong
+    /// contract — which is why this takes an ordered slice rather than a map.
+    pub fn multi_venue(
+        subscriptions: &[(Venue, &[String])],
+        clock: Arc<dyn Clock>,
+    ) -> anyhow::Result<Self> {
         let mut contracts = Contracts::default();
-        let mut books = Vec::with_capacity(tickers.len());
-        for ticker in tickers {
-            let id = contracts.intern(venue, ticker)?;
-            books.push(Book::new(venue, id));
+        let mut books = Vec::new();
+        for (venue, tickers) in subscriptions {
+            for ticker in *tickers {
+                let id = contracts.intern(*venue, ticker)?;
+                books.push(Book::new(*venue, id));
+            }
         }
         Ok(Self {
             books,
             contracts,
-            expected_seq: None,
+            expected_seq: [None; VENUE_COUNT],
             clock,
             metrics: BookMetrics::default(),
         })
+    }
+
+    /// Which venue an event belongs to.
+    ///
+    /// [`FeedEvent`] only names a venue on `Disconnected`; everything else
+    /// carries a [`ContractId`], which is venue-scoped by construction. Reading
+    /// it back off the book is therefore the authoritative answer, and it is
+    /// `None` exactly when the contract is not one this store subscribes to.
+    pub fn venue_of(&self, event: &FeedEvent) -> Option<Venue> {
+        match event {
+            FeedEvent::Disconnected { venue } => Some(*venue),
+            FeedEvent::Snapshot { contract, .. }
+            | FeedEvent::Delta { contract, .. }
+            | FeedEvent::Resubscribed { contract } => self.get(*contract).map(|book| book.venue),
+        }
+    }
+
+    /// Venues this store holds at least one book for.
+    pub fn venues(&self) -> Vec<Venue> {
+        Venue::ALL
+            .into_iter()
+            .filter(|venue| self.books.iter().any(|book| book.venue == *venue))
+            .collect()
     }
 
     pub fn contracts(&self) -> &Contracts {
@@ -103,8 +151,8 @@ impl BookStore {
         self.books.get(id.0 as usize)
     }
 
-    pub fn expected_seq(&self) -> Option<u64> {
-        self.expected_seq
+    pub fn expected_seq(&self, venue: Venue) -> Option<u64> {
+        self.expected_seq[venue.index()]
     }
 
     pub fn note_resync_request(&mut self) {
@@ -157,19 +205,18 @@ impl BookStore {
                 *seq,
                 self.clock.now_ms(),
             ),
-            FeedEvent::Disconnected { .. } => {
-                self.invalidate_all();
+            FeedEvent::Disconnected { venue } => {
+                self.invalidate_venue(*venue);
                 Applied::Invalidated
             }
-            FeedEvent::Resubscribed { .. } => {
+            FeedEvent::Resubscribed { contract } => {
+                let Some(venue) = self.get(*contract).map(|book| book.venue) else {
+                    return Applied::UnknownContract;
+                };
                 // Subscription seq resets with a new handshake; clear expectation
                 // so the next snapshot rebases without reporting a false gap.
-                self.expected_seq = None;
-                for book in &mut self.books {
-                    if book.state == BookState::Live {
-                        book.mark_resyncing();
-                    }
-                }
+                self.expected_seq[venue.index()] = None;
+                self.mark_venue_resyncing(venue);
                 Applied::Invalidated
             }
         }
@@ -189,12 +236,13 @@ impl BookStore {
         if book.contract_id != contract {
             return Applied::UnknownContract;
         }
+        let venue = book.venue;
         if let Err(error) = book.apply_snapshot(yes, no, seq, ts_ms) {
             tracing::warn!(%error, ?contract, "snapshot rejected");
             return Applied::Skipped;
         }
-        // Snapshot is absolute: always rebase the subscription expectation.
-        self.expected_seq = Some(seq.saturating_add(1));
+        // Snapshot is absolute: always rebase this venue's expectation.
+        self.expected_seq[venue.index()] = Some(seq.saturating_add(1));
         self.metrics.snapshots_applied = self.metrics.snapshots_applied.saturating_add(1);
         if book.is_crossed() {
             self.metrics.crossed_books_observed =
@@ -223,12 +271,16 @@ impl BookStore {
                 self.metrics.deltas_skipped_not_live.saturating_add(1);
             return Applied::Skipped;
         }
+        let venue = book.venue;
 
-        match self.expected_seq {
+        match self.expected_seq[venue.index()] {
             Some(expected) if seq == expected => {}
             Some(expected) => {
                 self.metrics.sequence_gaps = self.metrics.sequence_gaps.saturating_add(1);
-                self.mark_all_resyncing();
+                // Only this venue loses its books. The other venue's sequence
+                // came from a different handshake and is still intact.
+                self.mark_venue_resyncing(venue);
+                self.expected_seq[venue.index()] = None;
                 return Applied::Gap { expected, got: seq };
             }
             None => {
@@ -246,7 +298,7 @@ impl BookStore {
                     self.metrics.negative_level_clamps =
                         self.metrics.negative_level_clamps.saturating_add(1);
                 }
-                self.expected_seq = Some(seq.saturating_add(1));
+                self.expected_seq[venue.index()] = Some(seq.saturating_add(1));
                 self.metrics.deltas_applied = self.metrics.deltas_applied.saturating_add(1);
                 if book.is_crossed() {
                     self.metrics.crossed_books_observed =
@@ -265,21 +317,24 @@ impl BookStore {
         }
     }
 
-    fn mark_all_resyncing(&mut self) {
+    /// Demote this venue's live books, leaving every other venue untouched.
+    fn mark_venue_resyncing(&mut self, venue: Venue) {
         for book in &mut self.books {
-            if book.state == BookState::Live {
+            if book.venue == venue && book.state == BookState::Live {
                 book.mark_resyncing();
             }
         }
-        // After a gap, wait for a snapshot to rebase; do not accept deltas.
-        self.expected_seq = None;
     }
 
-    fn invalidate_all(&mut self) {
+    /// A disconnect takes down every book behind that socket, live or not, and
+    /// clears the expectation so the next snapshot rebases.
+    fn invalidate_venue(&mut self, venue: Venue) {
         for book in &mut self.books {
-            book.mark_resyncing();
+            if book.venue == venue {
+                book.mark_resyncing();
+            }
         }
-        self.expected_seq = None;
+        self.expected_seq[venue.index()] = None;
     }
 }
 

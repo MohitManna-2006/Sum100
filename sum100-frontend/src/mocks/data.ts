@@ -185,6 +185,33 @@ export const mockOpportunities: Opportunity[] = [
 
 export const mockHealth: HealthSnapshot = {
   connected: true,
+  overall: 'connected',
+  venues: [
+    {
+      venue: 'kalshi',
+      label: 'Kalshi',
+      connected: true,
+      subscribed: true,
+      state: 'healthy',
+      messagesReceived: 42_816,
+      parseErrors: 0,
+      reconnections: 0,
+      latencyP50: 2.3,
+      latencyP99: 4.1,
+    },
+    {
+      venue: 'polymarket',
+      label: 'Polymarket',
+      connected: false,
+      subscribed: false,
+      state: 'disconnected',
+      messagesReceived: 0,
+      parseErrors: 0,
+      reconnections: 0,
+      latencyP50: 0,
+      latencyP99: 0,
+    },
+  ],
   messagesReceived: 42_816,
   parseErrors: 0,
   gapCount: 0,

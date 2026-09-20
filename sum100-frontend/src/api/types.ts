@@ -24,8 +24,26 @@ export interface Opportunity {
   detectedAt?: string
 }
 
+export type OverallHealth = 'connected' | 'degraded' | 'erroring'
+
+export interface VenueSnapshot {
+  venue: string
+  label: string
+  connected: boolean
+  /** False when nothing feeds this venue on this run. */
+  subscribed: boolean
+  state: string
+  messagesReceived: number
+  parseErrors: number
+  reconnections: number
+  latencyP50: number
+  latencyP99: number
+}
+
 export interface HealthSnapshot {
   connected: boolean
+  overall: OverallHealth
+  venues: VenueSnapshot[]
   messagesReceived: number
   parseErrors: number
   gapCount: number

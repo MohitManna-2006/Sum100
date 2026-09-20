@@ -4,6 +4,8 @@
 //! fans already-computed [`EngineState`] snapshots out at a bounded cadence.
 
 use crate::engine::{ContractSummary, EngineState, SignalLeg};
+use crate::health::OverallHealth;
+use crate::metrics::Metrics;
 use crate::types::Cents;
 use futures_util::{SinkExt, StreamExt};
 use std::{collections::HashMap, io, time::Duration};
@@ -138,33 +140,83 @@ fn dashboard_state(state: &EngineState) -> serde_json::Value {
         })
         .collect();
 
+    // Per-venue detail, and the flat block below rolled up from it. Both are
+    // published: one field to glance at is useless without the venue that
+    // caused it, and the venue detail alone makes the common single-venue case
+    // harder to read than it was.
+    let venues: Vec<_> = state
+        .health
+        .venues
+        .iter()
+        .map(|venue| {
+            serde_json::json!({
+                "venue": venue.venue,
+                "connected": venue.healthy,
+                "subscribed": venue.subscribed,
+                "state": venue.state,
+                "last_message_age_ms": venue.last_message_age_ms,
+                "messages_received": venue.feed.map_or(0, |feed| feed.messages_received),
+                "parse_errors": venue.feed.map_or(0, |feed| feed.parse_errors),
+                "reconnections": venue.feed.map_or(0, |feed| feed.reconnections),
+                "latency_ms": latency(venue.feed.as_ref()),
+            })
+        })
+        .collect();
+
     // A feed that keeps no counters reports none, and the dashboard's own
     // contract is finite numbers, so those fields fall back to zero. The
     // `connected` flag beside them is the real reading either way, which is the
     // one that decides whether any of this is worth believing.
-    let feed = state.health.feed.unwrap_or_default();
+    let subscribed = state.health.venues.iter().filter(|v| v.subscribed);
+    let feed: Metrics =
+        subscribed
+            .clone()
+            .filter_map(|v| v.feed)
+            .fold(Metrics::default(), |mut total, venue| {
+                total.messages_received += venue.messages_received;
+                total.parse_errors += venue.parse_errors;
+                total.reconnections += venue.reconnections;
+                for (slot, count) in total
+                    .latency_buckets
+                    .iter_mut()
+                    .zip(venue.latency_buckets.iter())
+                {
+                    *slot += count;
+                }
+                total
+            });
     // Frames off the socket, which is what the dashboard labels "messages". A
     // frame the parser rejected never became an engine event, so the two counts
-    // differ, and the engine's is the fallback for a feed that keeps none.
-    let messages_received = state
-        .health
-        .feed
-        .map_or(state.engine.events_received, |feed| feed.messages_received);
+    // differ, and the engine's is the fallback when no feed keeps a count.
+    let measured = subscribed.clone().any(|venue| venue.feed.is_some());
+    let messages_received = if measured {
+        feed.messages_received
+    } else {
+        state.engine.events_received
+    };
     serde_json::json!({
         "timestamp_ms": state.timestamp_ms,
         "opportunities": opportunities,
         "health": {
-            "connected": state.health.kalshi_healthy,
+            "connected": state.health.overall == OverallHealth::Connected,
+            "overall": state.health.overall,
+            "venues": venues,
             "messages_received": messages_received,
             "parse_errors": feed.parse_errors,
             "sequence_gaps": state.engine.sequence_gaps,
-            "latency_ms": {
-                "p50": feed.latency_percentile_ms(0.50),
-                "p95": feed.latency_percentile_ms(0.95),
-                "p99": feed.latency_percentile_ms(0.99),
-            },
+            "latency_ms": latency(Some(&feed)),
             "reconnections": feed.reconnections,
         },
+    })
+}
+
+/// Quantiles for one feed, or zeros when nothing has been measured.
+fn latency(feed: Option<&Metrics>) -> serde_json::Value {
+    let feed = feed.copied().unwrap_or_default();
+    serde_json::json!({
+        "p50": feed.latency_percentile_ms(0.50),
+        "p95": feed.latency_percentile_ms(0.95),
+        "p99": feed.latency_percentile_ms(0.99),
     })
 }
 
@@ -172,7 +224,7 @@ fn dashboard_state(state: &EngineState) -> serde_json::Value {
 mod tests {
     use super::*;
     use crate::{
-        engine::{EngineMetrics, HealthStatus, Signal},
+        engine::{EngineMetrics, HealthStatus, Signal, VenueStatus},
         health::HealthState,
         metrics::Metrics,
         portfolio::PortfolioSummary,
@@ -200,10 +252,11 @@ mod tests {
                 daily_loss_limit_cents: 100_000,
             },
             health: HealthStatus {
-                kalshi_healthy: false,
-                kalshi_state: HealthState::Disconnected,
-                last_message_age_ms: 0,
-                feed: None,
+                venues: vec![
+                    venue_status(Venue::Kalshi, true),
+                    venue_status(Venue::Polymarket, false),
+                ],
+                overall: OverallHealth::Erroring,
             },
             risk: RiskStatus {
                 can_trade: false,
@@ -212,6 +265,35 @@ mod tests {
                 limits: RiskLimits::default(),
             },
         }
+    }
+
+    /// A venue that has said nothing. `subscribed` is what separates a feed
+    /// that is down from one that was never configured.
+    fn venue_status(venue: Venue, subscribed: bool) -> VenueStatus {
+        VenueStatus {
+            venue,
+            healthy: false,
+            state: HealthState::Disconnected,
+            subscribed,
+            last_message_age_ms: 0,
+            feed: None,
+        }
+    }
+
+    fn busy_feed() -> Metrics {
+        let mut feed = Metrics {
+            messages_received: 4_812,
+            parse_errors: 3,
+            reconnections: 2,
+            ..Metrics::default()
+        };
+        // Ten quick deltas and one that took nine seconds, so the median and the
+        // tail have to disagree for the panel to be telling the truth.
+        for _ in 0..10 {
+            feed.observe_latency(8, 0);
+        }
+        feed.observe_latency(9_000, 0);
+        feed
     }
 
     fn signal(legs: Vec<SignalLeg>) -> Signal {
@@ -270,23 +352,11 @@ mod tests {
         assert_eq!(health["sequence_gaps"], serde_json::json!(0));
         assert_eq!(health["latency_ms"]["p50"], serde_json::json!(0.0));
 
-        let mut feed = Metrics {
-            messages_received: 4_812,
-            parse_errors: 3,
-            reconnections: 2,
-            ..Metrics::default()
-        };
-        // Ten quick deltas and one that took nine seconds, so the median and the
-        // tail have to disagree for the panel to be telling the truth.
-        for _ in 0..10 {
-            feed.observe_latency(8, 0);
-        }
-        feed.observe_latency(9_000, 0);
-
         let mut state = silent_engine();
-        state.health.kalshi_healthy = true;
-        state.health.kalshi_state = HealthState::Healthy;
-        state.health.feed = Some(feed);
+        state.health.venues[0].healthy = true;
+        state.health.venues[0].state = HealthState::Healthy;
+        state.health.venues[0].feed = Some(busy_feed());
+        state.health.overall = OverallHealth::Connected;
         state.engine.sequence_gaps = 5;
         state.engine.events_received = 4_700;
 
@@ -307,7 +377,7 @@ mod tests {
     #[test]
     fn an_unmeasured_feed_reports_zero_latency_rather_than_a_bucket_bound() {
         let mut state = silent_engine();
-        state.health.feed = Some(Metrics {
+        state.health.venues[0].feed = Some(Metrics {
             messages_received: 12,
             ..Metrics::default()
         });
@@ -332,6 +402,54 @@ mod tests {
         assert_eq!(legs[0]["best_bid"], serde_json::json!(44));
         assert_eq!(legs[1]["best_ask"], serde_json::json!(56));
         assert_eq!(legs[1]["best_bid"], serde_json::json!(54));
+    }
+
+    /// The panel has to name the venue, not just the aggregate. Both venues are
+    /// always published, and the one nothing feeds is marked unsubscribed so it
+    /// reads as absent rather than as a venue that is down.
+    #[test]
+    fn every_venue_is_published_with_its_own_counters() {
+        let mut state = silent_engine();
+        state.health.venues[0].healthy = true;
+        state.health.venues[0].state = HealthState::Healthy;
+        state.health.venues[0].feed = Some(busy_feed());
+        state.health.overall = OverallHealth::Connected;
+
+        let health = dashboard_state(&state)["health"].clone();
+        let venues = health["venues"].as_array().expect("venues array").clone();
+        assert_eq!(venues.len(), 2);
+
+        assert_eq!(venues[0]["venue"], serde_json::json!("kalshi"));
+        assert_eq!(venues[0]["subscribed"], serde_json::json!(true));
+        assert_eq!(venues[0]["connected"], serde_json::json!(true));
+        assert_eq!(venues[0]["parse_errors"], serde_json::json!(3));
+        assert_eq!(venues[0]["latency_ms"]["p50"], serde_json::json!(10.0));
+
+        assert_eq!(venues[1]["venue"], serde_json::json!("polymarket"));
+        assert_eq!(venues[1]["subscribed"], serde_json::json!(false));
+        assert_eq!(venues[1]["connected"], serde_json::json!(false));
+        // No feed, so no counters of its own — never Kalshi's.
+        assert_eq!(venues[1]["parse_errors"], serde_json::json!(0));
+        assert_eq!(venues[1]["messages_received"], serde_json::json!(0));
+    }
+
+    /// A venue nobody feeds must not drag the aggregate down. Rolling an absent
+    /// venue up as a failure would report every healthy single-venue run as
+    /// degraded, which is the same class of lie as the constants this replaced.
+    #[test]
+    fn an_unsubscribed_venue_does_not_degrade_the_aggregate() {
+        let mut state = silent_engine();
+        state.health.venues[0].healthy = true;
+        state.health.venues[0].state = HealthState::Healthy;
+        state.health.venues[0].feed = Some(busy_feed());
+        state.health.overall = OverallHealth::Connected;
+
+        let health = dashboard_state(&state)["health"].clone();
+        assert_eq!(health["connected"], serde_json::json!(true));
+        assert_eq!(health["overall"], serde_json::json!("connected"));
+        // The aggregate counts only the venue that is actually fed.
+        assert_eq!(health["messages_received"], serde_json::json!(4_812));
+        assert_eq!(health["parse_errors"], serde_json::json!(3));
     }
 
     /// An unquoted contract must not report a free one. The wire needs a number,

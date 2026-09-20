@@ -7,6 +7,34 @@ pub enum Venue {
     Polymarket,
 }
 
+impl Venue {
+    /// Every venue, in the order identifiers are interned and reported.
+    ///
+    /// The registry interns all Kalshi members before any Polymarket one, and
+    /// this order has to agree with it: contract ids are positional, so a
+    /// different order silently renumbers every book.
+    pub const ALL: [Venue; 2] = [Venue::Kalshi, Venue::Polymarket];
+
+    /// Dense index for per-venue arrays. Deliberately next to [`Venue::ALL`] so
+    /// a new venue cannot be added without being given a slot in both.
+    pub fn index(self) -> usize {
+        match self {
+            Venue::Kalshi => 0,
+            Venue::Polymarket => 1,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Venue::Kalshi => "kalshi",
+            Venue::Polymarket => "polymarket",
+        }
+    }
+}
+
+/// Slots in every per-venue array in the engine.
+pub const VENUE_COUNT: usize = Venue::ALL.len();
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Level {
     pub price: Cents,

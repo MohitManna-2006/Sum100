@@ -238,7 +238,10 @@ async fn an_unhealthy_venue_blocks_a_profitable_trade() {
     let planned = h.engine.admit(opportunities);
     assert!(planned.is_empty());
     assert_eq!(h.engine.metrics.blocked_unhealthy, 1);
-    assert_eq!(h.engine.health.kalshi.state, HealthState::Stale);
+    assert_eq!(
+        h.engine.health.venue(Venue::Kalshi).state,
+        HealthState::Stale
+    );
     assert_eq!(h.engine.execute(planned, &client).await.len(), 0);
 }
 
@@ -397,7 +400,7 @@ async fn a_legged_trade_is_flagged_for_reconciliation_not_booked() {
     // hide a live one-sided position.
     assert_eq!(client.cancels.load(Ordering::SeqCst), 0);
     // The failure counts against venue health, so a run of them stops trading.
-    assert_eq!(h.engine.health.kalshi.consecutive_errors, 1);
+    assert_eq!(h.engine.health.venue(Venue::Kalshi).consecutive_errors, 1);
 }
 
 /// A live client is refused unless the operator opted in, and the refusal is on

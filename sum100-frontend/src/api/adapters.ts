@@ -90,6 +90,21 @@ export function adaptHealth(
 ): HealthSnapshot {
   return {
     connected: transportConnected && health.connected,
+    // A dead browser socket makes every venue reading hearsay, so the transport
+    // gates the rollup the same way it gates the aggregate flag above.
+    overall: transportConnected ? health.overall : 'erroring',
+    venues: health.venues.map((venue) => ({
+      venue: venue.venue,
+      label: displayVenue(venue.venue),
+      connected: transportConnected && venue.connected,
+      subscribed: venue.subscribed,
+      state: venue.state,
+      messagesReceived: venue.messages_received,
+      parseErrors: venue.parse_errors,
+      reconnections: venue.reconnections,
+      latencyP50: venue.latency_ms.p50,
+      latencyP99: venue.latency_ms.p99,
+    })),
     messagesReceived: health.messages_received,
     parseErrors: health.parse_errors,
     gapCount: health.sequence_gaps,
