@@ -189,7 +189,7 @@ fn rsa_pss_signature_verifies_documented_message_and_rejects_tampering() {
 #[test]
 fn recorder_round_trip_keeps_raw_bytes_without_blank_records() {
     let root = temp();
-    let mut recorder = Recorder::new(&root).unwrap();
+    let mut recorder = Recorder::new(&root, Venue::Kalshi).unwrap();
     let mut inputs = fixture("stage1-orderbook.ndjson");
     inputs.extend(fixture("stage2-live-orderbook.ndjson"));
     // Noncanonical JSON, invalid JSON, CR, spaces, and embedded newlines must
@@ -227,7 +227,7 @@ fn recorder_round_trip_keeps_raw_bytes_without_blank_records() {
     assert!(decoded.lines().all(|line| !line.is_empty()));
     assert!(!decoded.contains("\n\n"));
     drop(recorder);
-    let mut resumed = Recorder::new(&root).unwrap();
+    let mut resumed = Recorder::new(&root, Venue::Kalshi).unwrap();
     resumed.write(1789342115870, "text", "last").unwrap();
     resumed.flush().unwrap();
     assert_eq!(
@@ -307,8 +307,8 @@ fn fresh_live_session_and_real_no_side_price_are_preserved() {
 #[test]
 fn recorder_rejects_concurrent_writer_and_corrupt_append() {
     let root = temp();
-    let mut recorder = Recorder::new(&root).unwrap();
-    assert!(Recorder::new(&root).is_err());
+    let mut recorder = Recorder::new(&root, Venue::Kalshi).unwrap();
+    assert!(Recorder::new(&root, Venue::Kalshi).is_err());
     recorder
         .write(1789342115869, "text", "untouched\n\n")
         .unwrap();
@@ -327,7 +327,7 @@ fn recorder_rejects_concurrent_writer_and_corrupt_append() {
         .write_all(b"broken gzip member")
         .unwrap();
     let before = fs::read(&path).unwrap();
-    let mut recorder = Recorder::new(&root).unwrap();
+    let mut recorder = Recorder::new(&root, Venue::Kalshi).unwrap();
     assert!(
         recorder
             .write(1789342115869, "text", "must not append")

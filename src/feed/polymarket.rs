@@ -36,14 +36,24 @@
 //! would put a quote nobody made in front of the solver.
 
 use crate::{
-    feed::FeedEvent,
+    clock::Clock,
+    feed::{Feed, FeedEvent},
     metrics::Metrics,
+    record::{Control, Recorder},
     types::{Cents, ContractId, Contracts, Level, Venue, parse_price_cents, parse_size_contracts},
 };
 
 pub use crate::types::TokenSide;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
+use base64::Engine as _;
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc, time::Duration};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinHandle,
+};
+use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BookSnapshot {
@@ -85,7 +95,7 @@ impl Parsed {
     /// venue does not supply, so the caller provides one: it is a local count of
     /// snapshots for that book, used to satisfy the book store's rebase and
     /// never to detect a gap, which this venue gives no way to do.
-    pub fn into_events(self, snapshot_seq: impl Fn(ContractId) -> u64) -> Vec<FeedEvent> {
+    pub fn into_events(self, mut snapshot_seq: impl FnMut(ContractId) -> u64) -> Vec<FeedEvent> {
         match self {
             Parsed::Books(books) => books
                 .into_iter()
@@ -314,5 +324,283 @@ impl Parser {
             bids,
             asks,
         }))
+    }
+}
+
+/// The public market-data channel. No credentials: it carries order books only.
+pub const WS_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
+
+/// The venue answers this with a bare `PONG`, and expects it often enough that
+/// a silent client is dropped.
+const HEARTBEAT: Duration = Duration::from_secs(10);
+
+/// Silence before the socket is presumed dead. The market channel is chattier
+/// than Kalshi's and sends a heartbeat reply on demand, so a quiet minute here
+/// means the connection is gone rather than the market being still.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Live Polymarket market-channel feed.
+///
+/// Shaped like [`crate::feed::kalshi::KalshiFeed`]: a worker task owns the
+/// socket, the parser, and the recorder, and the handle is a receiver. That
+/// keeps every byte on the wire recorded before it is parsed, which is what
+/// makes a session replayable, and it keeps the reconnect loop off the caller.
+pub struct PolymarketFeed {
+    events: mpsc::Receiver<FeedEvent>,
+    shutdown: watch::Sender<bool>,
+    resync: watch::Sender<u64>,
+    metrics: watch::Receiver<Metrics>,
+    worker: JoinHandle<Result<Metrics>>,
+}
+
+impl Feed for PolymarketFeed {
+    fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>> {
+        Box::pin(self.events.recv())
+    }
+
+    fn request_resync(&self) {
+        PolymarketFeed::request_resync(self);
+    }
+
+    fn metrics(&self) -> Option<Metrics> {
+        Some(*self.metrics.borrow())
+    }
+}
+
+impl PolymarketFeed {
+    pub fn start(
+        tokens: Vec<String>,
+        mut recorder: Recorder,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self> {
+        ensure!(
+            !tokens.is_empty() && tokens.iter().all(|t| !t.trim().is_empty()),
+            "at least one nonempty market token is required"
+        );
+        let mut parser = Parser::new(&tokens)?;
+        parser.metrics.bytes_recorded += recorder.write_control(
+            clock.now_ms(),
+            &Control::SessionStarted {
+                environment: "production".into(),
+                tickers: tokens.clone(),
+            },
+        )?;
+        let (send, events) = mpsc::channel(256);
+        let (shutdown, stop) = watch::channel(false);
+        let (resync_tx, resync_rx) = watch::channel(0u64);
+        let (metrics_tx, metrics_rx) = watch::channel(parser.metrics);
+        let worker = tokio::spawn(async move {
+            let mut recorder = recorder;
+            let mut parser = parser;
+            let result = run(
+                &tokens,
+                clock.as_ref(),
+                &mut recorder,
+                &mut parser,
+                send,
+                resync_rx,
+                stop,
+                &metrics_tx,
+            )
+            .await;
+            recorder.flush()?;
+            parser.metrics.log(Venue::Polymarket);
+            metrics_tx.send_replace(parser.metrics);
+            result?;
+            Ok(parser.metrics)
+        });
+        Ok(Self {
+            events,
+            shutdown,
+            resync: resync_tx,
+            metrics: metrics_rx,
+            worker,
+        })
+    }
+
+    /// Force a socket drop so the feed reconnects and receives fresh books.
+    ///
+    /// This is the only continuity mechanism the venue affords. It publishes no
+    /// sequence numbers, and the `hash` on each message is per token rather than
+    /// a chain, so a dropped frame cannot be detected from the stream itself —
+    /// only corrected by asking for the book again.
+    pub fn request_resync(&self) {
+        let next = self.resync.borrow().saturating_add(1);
+        let _ = self.resync.send(next);
+    }
+
+    pub fn stop(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    pub async fn shutdown(mut self) -> Result<Metrics> {
+        self.stop();
+        while self.events.recv().await.is_some() {}
+        self.worker.await?
+    }
+}
+
+fn subscription(tokens: &[String]) -> String {
+    serde_json::json!({ "assets_ids": tokens, "type": "market" }).to_string()
+}
+
+/// Drive one socket until it dies, then back off and rebuild it.
+#[allow(clippy::too_many_arguments)]
+async fn run(
+    tokens: &[String],
+    clock: &dyn Clock,
+    recorder: &mut Recorder,
+    parser: &mut Parser,
+    send: mpsc::Sender<FeedEvent>,
+    mut resync: watch::Receiver<u64>,
+    mut stop: watch::Receiver<bool>,
+    metrics: &watch::Sender<Metrics>,
+) -> Result<()> {
+    let mut flush = tokio::time::interval(Duration::from_secs(2));
+    let mut attempt = 0u32;
+    let mut reconnect = false;
+    // One snapshot counter per contract, to rebase the book store. It is not a
+    // sequence: the venue publishes none, and a number minted here could only
+    // ever agree with itself.
+    let mut snapshot_seq: HashMap<ContractId, u64> = HashMap::new();
+
+    loop {
+        if reconnect {
+            let wait = crate::feed::kalshi::backoff_ms(attempt, rand::random());
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(wait)) => {}
+                _ = stop.changed() => return Ok(()),
+            }
+        }
+        let socket = tokio::select! {
+            result = tokio::time::timeout(
+                Duration::from_secs(15),
+                tokio_tungstenite::connect_async(WS_URL),
+            ) => result,
+            _ = stop.changed() => return Ok(()),
+        };
+        let mut socket = match socket.map_err(anyhow::Error::from).and_then(|r| Ok(r?.0)) {
+            Ok(socket) => socket,
+            Err(error) => {
+                tracing::warn!(%error, "connection failed; retrying");
+                if !reconnect {
+                    parser.metrics.bytes_recorded += recorder.write_control(
+                        clock.now_ms(),
+                        &Control::Disconnected {
+                            reason: format!("connection failed: {error}"),
+                        },
+                    )?;
+                    send.send(FeedEvent::Disconnected {
+                        venue: Venue::Polymarket,
+                    })
+                    .await?;
+                }
+                attempt = attempt.saturating_add(1);
+                reconnect = true;
+                continue;
+            }
+        };
+
+        socket
+            .send(Message::Text(subscription(tokens).into()))
+            .await?;
+        if reconnect {
+            parser.metrics.reconnections += 1;
+            parser.metrics.bytes_recorded +=
+                recorder.write_control(clock.now_ms(), &Control::Reconnected { attempt })?;
+            parser.metrics.bytes_recorded += recorder.write_control(
+                clock.now_ms(),
+                &Control::Resubscribed {
+                    tickers: tokens.to_vec(),
+                },
+            )?;
+            for token in tokens {
+                let contract = parser
+                    .contracts
+                    .get(Venue::Polymarket, token)
+                    .context("missing interned token")?;
+                send.send(FeedEvent::Resubscribed { contract }).await?;
+            }
+        }
+        attempt = 0;
+
+        let mut heartbeat = tokio::time::interval(HEARTBEAT);
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // The first tick fires immediately; the subscription just went out.
+        heartbeat.tick().await;
+        while resync.has_changed().unwrap_or(false) {
+            resync.borrow_and_update();
+        }
+
+        let reason = loop {
+            let frame = tokio::select! {
+                frame = socket.next() => frame,
+                _ = flush.tick() => { recorder.flush()?; continue; }
+                _ = heartbeat.tick() => {
+                    // A text PING, which is what this venue answers; a
+                    // websocket ping frame is not what keeps it open.
+                    if let Err(error) = socket.send(Message::Text("PING".into())).await {
+                        break format!("heartbeat failed: {error}");
+                    }
+                    continue;
+                }
+                _ = stop.changed() => return Ok(()),
+                _ = resync.changed() => break "resync requested".to_owned(),
+                _ = tokio::time::sleep(IDLE_TIMEOUT) => break "idle timeout".to_owned(),
+            };
+            let frame = match frame {
+                Some(Ok(frame)) => frame,
+                Some(Err(error)) => break format!("websocket error: {error}"),
+                None => break "websocket stream ended".to_owned(),
+            };
+            let received = clock.now_ms();
+            parser.metrics.messages_received += 1;
+            let (kind, raw) = match &frame {
+                Message::Text(text) => ("text", text.to_string()),
+                Message::Close(_) => break "venue close frame".to_owned(),
+                // Protocol-level pings are answered by tungstenite itself; they
+                // carry no book data and are recorded for completeness only.
+                Message::Binary(bytes) => (
+                    "binary_base64",
+                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                ),
+                Message::Ping(bytes) | Message::Pong(bytes) => (
+                    "ping_base64",
+                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                ),
+                Message::Frame(_) => continue,
+            };
+            // Recorded before it is parsed, so a replay sees the same bytes the
+            // live run did even when the parser rejects them.
+            parser.metrics.bytes_recorded += recorder.write(received, kind, &raw)?;
+            if kind == "text"
+                && let Some(parsed) = parser.parse(&raw, received)
+            {
+                for event in parsed.into_events(|contract| {
+                    let seq = snapshot_seq.entry(contract).or_insert(0);
+                    *seq += 1;
+                    *seq
+                }) {
+                    send.send(event).await?;
+                }
+            }
+            metrics.send_replace(parser.metrics);
+        };
+
+        parser.metrics.bytes_recorded += recorder.write_control(
+            clock.now_ms(),
+            &Control::Disconnected {
+                reason: reason.clone(),
+            },
+        )?;
+        metrics.send_replace(parser.metrics);
+        tracing::warn!(reason, "feed disconnected");
+        send.send(FeedEvent::Disconnected {
+            venue: Venue::Polymarket,
+        })
+        .await?;
+        recorder.flush()?;
+        attempt = attempt.saturating_add(1);
+        reconnect = true;
     }
 }

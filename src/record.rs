@@ -7,6 +7,7 @@
 //! "control"` envelopes so replay takes the same resync path the live run did.
 //! The tag is the envelope `kind`, never the payload content; files recorded
 //! before control envelopes existed parse unchanged and simply contain none.
+use crate::types::Venue;
 use anyhow::{Context, Result, ensure};
 use chrono::{DateTime, Utc};
 use flate2::{Compression, read::MultiGzDecoder, write::GzEncoder};
@@ -65,24 +66,29 @@ pub struct Recorder {
     // Hold an OS lock for this venue/output directory across daily rotations.
     _lock: File,
     root: PathBuf,
+    venue: Venue,
     day: Option<String>,
     sequence: u64,
     encoder: Option<GzEncoder<File>>,
     path: Option<PathBuf>,
 }
 impl Recorder {
-    pub fn new(root: impl AsRef<Path>) -> Result<Self> {
+    /// The venue names both the daily file and the lock, so two venues can
+    /// record into one directory at once and a file says which venue wrote it.
+    /// Kalshi's names are unchanged, so existing corpora keep resuming.
+    pub fn new(root: impl AsRef<Path>, venue: Venue) -> Result<Self> {
         std::fs::create_dir_all(root.as_ref())?;
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
-            .open(root.as_ref().join(".kalshi.lock"))?;
+            .open(root.as_ref().join(format!(".{}.lock", venue.name())))?;
         lock.try_lock()
             .context("another recorder owns this output directory")?;
         Ok(Self {
             _lock: lock,
             root: root.as_ref().to_owned(),
+            venue,
             day: None,
             sequence: 0,
             encoder: None,
@@ -95,7 +101,9 @@ impl Recorder {
         let day = time.format("%Y-%m-%d").to_string();
         if self.day.as_ref() != Some(&day) {
             self.flush()?;
-            let path = self.root.join(format!("kalshi-{day}.ndjson.gz"));
+            let path = self
+                .root
+                .join(format!("{}-{day}.ndjson.gz", self.venue.name()));
             if path.exists() {
                 // Validate the existing corpus and resume above its last sequence.
                 // Refuse a damaged tail rather than append behind unreadable bytes.

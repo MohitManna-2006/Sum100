@@ -18,6 +18,7 @@ use sum100::{
     feed::{
         Feed,
         kalshi::{self, Credentials, Environment, KalshiFeed},
+        polymarket::PolymarketFeed,
         replay::{Pace, ReplayFeed, ReplayOptions},
         rest::Rest,
     },
@@ -42,6 +43,9 @@ struct Cli {
 #[derive(Clone, ValueEnum)]
 enum VenueArg {
     Kalshi,
+    /// Public market data only. The CLOB market channel needs no credentials,
+    /// and nothing on this venue can be traded yet.
+    Polymarket,
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum PaceArg {
@@ -424,30 +428,32 @@ async fn main() -> Result<()> {
         .init();
     match Cli::parse().command {
         Command::Record {
-            venue: _,
+            venue,
             prod,
             tickers,
             out,
             seconds,
         } => {
             let env = environment(prod);
-            let recorder = Recorder::new(out.join(env.name()))?;
-            let mut feed = KalshiFeed::start(env, tickers, recorder, Arc::new(WallClock))?;
-            let deadline = async {
-                match seconds {
-                    Some(s) => tokio::time::sleep(Duration::from_secs(s)).await,
-                    None => std::future::pending::<()>().await,
+            let dir = out.join(env.name());
+            // Each venue keeps its concrete type here: shutdown drains the
+            // worker and returns its metrics, which the trait does not carry.
+            let metrics = match venue {
+                VenueArg::Kalshi => {
+                    let recorder = Recorder::new(dir, Venue::Kalshi)?;
+                    let mut feed = KalshiFeed::start(env, tickers, recorder, Arc::new(WallClock))?;
+                    drain_until_deadline(&mut feed, seconds).await;
+                    feed.shutdown().await?
+                }
+                // Tokens, not tickers: Polymarket names a market by its CLOB
+                // token id, which is what `--tickers` carries for this venue.
+                VenueArg::Polymarket => {
+                    let recorder = Recorder::new(dir, Venue::Polymarket)?;
+                    let mut feed = PolymarketFeed::start(tickers, recorder, Arc::new(WallClock))?;
+                    drain_until_deadline(&mut feed, seconds).await;
+                    feed.shutdown().await?
                 }
             };
-            tokio::pin!(deadline);
-            loop {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => break,
-                    _ = &mut deadline => break,
-                    event = feed.next() => match event { Some(event) => tracing::debug!(?event, "feed event"), None => break },
-                }
-            }
-            let metrics = feed.shutdown().await?;
             tracing::info!(?metrics, "recording finished and gzip flushed");
         }
         Command::Dump {
@@ -464,7 +470,7 @@ async fn main() -> Result<()> {
             let clock: Arc<dyn Clock> = Arc::new(WallClock);
             let mut store = BookStore::new(Venue::Kalshi, &tickers, clock.clone())?;
             let mut gaps = GapLog::default();
-            let recorder = Recorder::new(out.join(env.name()))?;
+            let recorder = Recorder::new(out.join(env.name()), Venue::Kalshi)?;
             let mut feed = KalshiFeed::start(env, tickers, recorder, clock.clone())?;
             let deadline = async {
                 match seconds {
@@ -807,6 +813,30 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Read events until the deadline, Ctrl-C, or the feed closing.
+///
+/// Recording only needs the bytes on disk, which the feed's worker writes
+/// before an event ever reaches here, so this drives the stream and discards it.
+async fn drain_until_deadline<F: Feed + ?Sized>(feed: &mut F, seconds: Option<u64>) {
+    let deadline = async {
+        match seconds {
+            Some(s) => tokio::time::sleep(Duration::from_secs(s)).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => break,
+            _ = &mut deadline => break,
+            event = feed.next() => match event {
+                Some(event) => tracing::debug!(?event, "feed event"),
+                None => break,
+            },
+        }
+    }
+}
+
 /// Everything `scan` and `trade` share. They are the same loop; `trade` just
 /// exposes the capital and risk knobs and the live-order opt-in.
 struct EngineRun {
@@ -968,7 +998,7 @@ async fn run_engine(args: EngineRun) -> Result<()> {
         None => {
             let env = environment(args.prod);
             let clock: Arc<dyn Clock> = Arc::new(WallClock);
-            let recorder = Recorder::new(args.out.join(env.name()))?;
+            let recorder = Recorder::new(args.out.join(env.name()), Venue::Kalshi)?;
             let store = BookStore::new(Venue::Kalshi, &tickers, clock.clone())?;
             let portfolio = Portfolio::new(starting_capital, daily_loss_limit, clock.now_ms());
             let client: Box<dyn OrderClient> = if live_orders {

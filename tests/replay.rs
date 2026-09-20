@@ -50,7 +50,7 @@ enum Entry {
 
 /// Write entries through the real recorder and return the single daily file.
 fn record(dir: &Path, entries: &[Entry]) -> PathBuf {
-    let mut recorder = Recorder::new(dir).unwrap();
+    let mut recorder = Recorder::new(dir, Venue::Kalshi).unwrap();
     for entry in entries {
         match entry {
             Entry::Text(ts, raw) => recorder.write(*ts, "text", raw).unwrap(),
@@ -383,7 +383,7 @@ async fn sessions_in_one_daily_file_are_separated() {
 #[test]
 fn control_kind_is_the_tag_and_old_envelopes_still_parse() {
     let dir = temp();
-    let mut recorder = Recorder::new(&dir).unwrap();
+    let mut recorder = Recorder::new(&dir, Venue::Kalshi).unwrap();
     assert!(recorder.write(BASE_MS, CONTROL_KIND, "{}").is_err());
     // Venue text that happens to look like a control payload stays venue text.
     recorder

@@ -27,13 +27,22 @@ impl FeeModel for KalshiFees {
     }
 }
 
-/// Placeholder Polymarket schedule.
+/// Placeholder Polymarket schedule, and it now understates.
 ///
-/// Polymarket charges no taker fee on most CLOB markets today, so the default is
-/// zero and a cross-venue trade is priced on the Kalshi leg alone. Phase 7 owns
-/// the real model. Zero is the honest placeholder rather than a guess: inventing
-/// a fee would suppress real signals, and inventing a wrong non-zero one would
-/// be indistinguishable from a modelling bug once the real schedule lands.
+/// The venue charges takers `size * rate * p * (1 - p)`, with `rate` set per
+/// market and exposed as Gamma's `feeType`: `crypto_fees_v2` is 0.07,
+/// `sports_fees_v3` 0.05, `politics_fees` and finance 0.04, `zero_fees` nothing.
+/// Live crypto markets — the ones a BTC ladder would pair against — report
+/// `feesEnabled: true`, so at 50c a Crypto leg costs `0.07 * 0.25`, about 1.75%
+/// of the dollar it settles for.
+///
+/// `base_fee_bps` still defaults to zero, which means a cross-venue candidate is
+/// priced on the Kalshi leg alone and its edge is *overstated*. That is the
+/// dangerous direction, and it is the reason the real model is the next piece of
+/// work rather than a later one. It is left at zero rather than guessed because
+/// the rate is per market, and a single wrong non-zero figure applied to every
+/// market would be indistinguishable from a modelling bug once the real schedule
+/// lands. Nothing trades Polymarket yet, so nothing acts on it today.
 #[derive(Clone, Default)]
 pub struct PolymarketFees {
     pub base_fee_bps: i64,
