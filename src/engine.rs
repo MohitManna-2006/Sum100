@@ -36,6 +36,7 @@ use crate::{
     feed::{Feed, FeedEvent},
     fees::FeeModels,
     health::{HealthMonitor, HealthState},
+    metrics::Metrics,
     portfolio::{Portfolio, PortfolioSummary, Position, PositionLeg},
     registry::{EventId, GroupId, Registry},
     risk::{self, RiskLimits, RiskStatus},
@@ -200,6 +201,11 @@ pub struct ContractSummary {
     pub seq: u64,
     pub best_bid: Option<Cents>,
     pub best_ask: Option<Cents>,
+    /// Top of book for the no outcome, which is a separate ladder rather than
+    /// the yes quote negated: a leg that buys no is filled against resting yes
+    /// bids, so this is the price that leg actually pays.
+    pub best_no_bid: Option<Cents>,
+    pub best_no_ask: Option<Cents>,
     pub age_ms: u64,
 }
 
@@ -221,6 +227,10 @@ pub struct HealthStatus {
     pub kalshi_healthy: bool,
     pub kalshi_state: HealthState,
     pub last_message_age_ms: u64,
+    /// The feed's own counters, when it keeps them. `None` means nobody is in a
+    /// position to answer — a feed with no counters, or state built outside a
+    /// run — and is deliberately not the same value as a feed reporting zeros.
+    pub feed: Option<Metrics>,
 }
 
 /// A trade that passed every gate and is ready to place.
@@ -243,6 +253,9 @@ pub struct Engine<S: OpportunitySink> {
     clock: Arc<dyn Clock>,
     /// Set by a sequence gap, consumed by the run loop, which owns the feed.
     resync_pending: bool,
+    /// Last counters read off the feed. The run loop owns the feed, and
+    /// [`Engine::state`] does not, so the reading is cached as it goes by.
+    feed_metrics: Option<Metrics>,
     pub portfolio: Portfolio,
     pub health: HealthMonitor,
     pub metrics: EngineMetrics,
@@ -267,6 +280,7 @@ impl<S: OpportunitySink> Engine<S> {
             config,
             clock,
             resync_pending: false,
+            feed_metrics: None,
             portfolio,
             health: HealthMonitor::new(config.max_idle_ms),
             metrics: EngineMetrics::default(),
@@ -564,6 +578,9 @@ impl<S: OpportunitySink> Engine<S> {
         broadcast: &broadcast::Sender<EngineState>,
     ) {
         while let Some(event) = feed.next().await {
+            // Before the step, so a frame the parser rejected is already counted
+            // by the time the state built from this event goes out.
+            self.feed_metrics = feed.metrics();
             let opportunities = self.step(&event);
             if std::mem::take(&mut self.resync_pending) {
                 feed.request_resync();
@@ -624,6 +641,8 @@ impl<S: OpportunitySink> Engine<S> {
                     seq: book.seq,
                     best_bid: book.best_bid().map(|level| level.price),
                     best_ask: book.best_ask().map(|level| level.price),
+                    best_no_bid: book.best_no_bid().map(|level| level.price),
+                    best_no_ask: book.best_no_ask().map(|level| level.price),
                     age_ms: now_ms.saturating_sub(book.updated_at_ms),
                 })
                 .collect(),
@@ -635,6 +654,7 @@ impl<S: OpportunitySink> Engine<S> {
                 kalshi_healthy: kalshi.is_healthy(),
                 kalshi_state: kalshi.state,
                 last_message_age_ms: kalshi.idle_ms(now_ms),
+                feed: self.feed_metrics,
             },
             risk: self.risk_status(),
         }

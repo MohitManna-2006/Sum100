@@ -2,6 +2,7 @@ pub mod kalshi;
 pub mod replay;
 pub mod rest;
 
+use crate::metrics::Metrics;
 use crate::types::{Cents, ContractId, Level, Side, Venue};
 use std::{future::Future, pin::Pin};
 
@@ -49,4 +50,15 @@ pub trait Feed: Send {
     /// snapshot. Having it on the trait means the engine loop handles a gap the
     /// same way for every feed instead of knowing which one it holds.
     fn request_resync(&self) {}
+
+    /// The feed's own counters as they stand now, for the dashboard.
+    ///
+    /// Parse errors and reconnections are only ever visible here: a payload the
+    /// parser rejects produces no event, so nothing downstream can count what it
+    /// never saw. The default is `None` rather than a zeroed [`Metrics`],
+    /// because a feed that does not keep these has no answer, and zeros would
+    /// reach the dashboard as a flawless venue rather than an unmeasured one.
+    fn metrics(&self) -> Option<Metrics> {
+        None
+    }
 }

@@ -100,6 +100,13 @@ impl Feed for ReplayFeed {
     fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>> {
         Box::pin(self.next_event())
     }
+
+    /// Read straight off the parser this feed owns. Replay has no worker task to
+    /// publish through, and the counts are a function of the recorded bytes, so
+    /// a dashboard driven by a replay shows exactly what the live run showed.
+    fn metrics(&self) -> Option<Metrics> {
+        Some(self.parser.metrics)
+    }
 }
 
 impl ReplayFeed {
@@ -233,6 +240,10 @@ impl ReplayFeed {
                 venue: Venue::Kalshi,
             }),
             Some(Control::Resubscribed { tickers }) => {
+                // The live feed counts one reconnection per envelope it writes
+                // here, so counting one per envelope read reproduces the figure
+                // the live run reported rather than leaving replay at zero.
+                self.parser.metrics.reconnections += 1;
                 for ticker in tickers {
                     let contract = self
                         .parser

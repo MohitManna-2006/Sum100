@@ -299,6 +299,8 @@ pub struct KalshiFeed {
     events: mpsc::Receiver<FeedEvent>,
     shutdown: watch::Sender<bool>,
     resync: watch::Sender<u64>,
+    /// Latest counters published by the worker, which owns the parser.
+    metrics: watch::Receiver<Metrics>,
     worker: JoinHandle<Result<Metrics>>,
 }
 impl Feed for KalshiFeed {
@@ -308,6 +310,16 @@ impl Feed for KalshiFeed {
 
     fn request_resync(&self) {
         KalshiFeed::request_resync(self);
+    }
+
+    /// A copy of what the worker last published.
+    ///
+    /// The parser lives inside the spawned task, so this cannot be a borrow. A
+    /// [`watch`] channel keeps the cost on the worker to one store per frame and
+    /// leaves the read side lock-free enough to sit on the engine's publish
+    /// path, which is the only place it is read.
+    fn metrics(&self) -> Option<Metrics> {
+        Some(*self.metrics.borrow())
     }
 }
 impl KalshiFeed {
@@ -335,6 +347,7 @@ impl KalshiFeed {
         let (send, events) = mpsc::channel(256);
         let (shutdown, stop) = watch::channel(false);
         let (resync_tx, resync_rx) = watch::channel(0u64);
+        let (metrics_tx, metrics_rx) = watch::channel(parser.metrics);
         let link = Link {
             env,
             credentials,
@@ -344,9 +357,21 @@ impl KalshiFeed {
         let worker = tokio::spawn(async move {
             let mut recorder = recorder;
             let mut parser = parser;
-            let result = run(&link, &mut recorder, &mut parser, send, resync_rx, stop).await;
+            let result = run(
+                &link,
+                &mut recorder,
+                &mut parser,
+                send,
+                resync_rx,
+                stop,
+                &metrics_tx,
+            )
+            .await;
             recorder.flush()?;
             parser.metrics.log(Venue::Kalshi);
+            // A final publish so a dashboard reading after the socket died sees
+            // the counts that explain why, not the ones from the last good frame.
+            metrics_tx.send_replace(parser.metrics);
             result?;
             Ok(parser.metrics)
         });
@@ -354,6 +379,7 @@ impl KalshiFeed {
             events,
             shutdown,
             resync: resync_tx,
+            metrics: metrics_rx,
             worker,
         })
     }
@@ -397,6 +423,7 @@ async fn run(
     send: mpsc::Sender<FeedEvent>,
     mut resync: watch::Receiver<u64>,
     mut stop: watch::Receiver<bool>,
+    metrics: &watch::Sender<Metrics>,
 ) -> Result<()> {
     let Link {
         env,
@@ -572,6 +599,10 @@ async fn run(
             } else if matches!(frame, Message::Close(_)) {
                 break "venue close frame".to_owned();
             }
+            // One store per frame, next to a JSON parse and a gzip write that
+            // each cost far more. The frames that break out of this loop instead
+            // are covered by the publish after the disconnect envelope below.
+            metrics.send_replace(parser.metrics);
             // Flush automatic pong replies even if the next inbound frame stalls.
             match tokio::time::timeout(Duration::from_secs(5), socket.flush()).await {
                 Ok(Ok(())) => {}
@@ -587,6 +618,7 @@ async fn run(
                 reason: reason.clone(),
             },
         )?;
+        metrics.send_replace(parser.metrics);
         tracing::warn!(reason, "feed disconnected");
         send.send(FeedEvent::Disconnected {
             venue: Venue::Kalshi,

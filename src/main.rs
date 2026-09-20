@@ -27,7 +27,7 @@ use sum100::{
     types::{BookState, Venue},
     verify::{Expected, GapLog, StateDigest},
 };
-use tokio::sync::broadcast;
+use tokio::{net::TcpListener, sync::broadcast};
 use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Parser)]
@@ -157,9 +157,9 @@ enum Command {
         /// Infer the constraint graph from venue metadata instead of the file.
         #[arg(long)]
         auto_discover: bool,
-        /// Dashboard API listen address.
-        #[arg(long, default_value = "127.0.0.1:8080")]
-        serve: SocketAddr,
+        /// Serve the dashboard API on this address. Omitted, nothing listens.
+        #[arg(long, value_name = "ADDR")]
+        serve: Option<SocketAddr>,
     },
     /// Run the engine and place orders. Paper mode unless --live-orders.
     Trade {
@@ -738,12 +738,10 @@ async fn main() -> Result<()> {
             session,
             signals_out,
             auto_discover,
-            // Another workstream's dashboard flag. The API layer it feeds is
-            // not implemented here, so the engine ignores it rather than
-            // dropping the flag and breaking that work.
-            serve: _,
+            serve,
         } => {
             run_engine(EngineRun {
+                serve,
                 live,
                 replay,
                 config,
@@ -800,6 +798,8 @@ async fn main() -> Result<()> {
                 live_orders,
                 signals_out,
                 auto_discover,
+                // `trade` has no dashboard flag to pass on.
+                serve: None,
             })
             .await?;
         }
@@ -826,6 +826,8 @@ struct EngineRun {
     live_orders: bool,
     signals_out: Option<PathBuf>,
     auto_discover: bool,
+    /// Where to serve the dashboard API, if anywhere.
+    serve: Option<SocketAddr>,
 }
 
 async fn run_engine(args: EngineRun) -> Result<()> {
@@ -901,6 +903,22 @@ async fn run_engine(args: EngineRun) -> Result<()> {
     };
 
     let (broadcast_tx, _) = broadcast::channel::<EngineState>(256);
+    // Bound before the feed opens, which for a replay means decoding the whole
+    // file: a dashboard that starts the engine watches for this port and would
+    // otherwise give up while the recording was still being read.
+    let dashboard = match args.serve {
+        Some(address) => {
+            let listener = TcpListener::bind(address)
+                .await
+                .with_context(|| format!("serving the dashboard API on {address}"))?;
+            tracing::info!(%address, "dashboard API listening");
+            Some(tokio::spawn(sum100::api::serve(
+                listener,
+                broadcast_tx.clone(),
+            )))
+        }
+        None => None,
+    };
     let mut states = broadcast_tx.subscribe();
     let drain = tokio::spawn(async move {
         let (mut received, mut lagged) = (0u64, 0u64);
@@ -993,6 +1011,12 @@ async fn run_engine(args: EngineRun) -> Result<()> {
         }
     };
 
+    // Before the sender is dropped: the server holds a clone of it, so the
+    // drain below would never see the channel close while it is still alive.
+    if let Some(task) = dashboard {
+        task.abort();
+        let _ = task.await;
+    }
     drop(broadcast_tx);
     let (states_received, states_lagged) = drain.await?;
     print_scan_report(&engine, states_received, states_lagged);
