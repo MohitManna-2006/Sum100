@@ -80,7 +80,12 @@ impl Feed for VecFeed {
         Box::pin(async move { event })
     }
 
-    fn request_resync(&self) {
+    fn venue(&self) -> Option<Venue> {
+        Some(Venue::Kalshi)
+    }
+
+    fn request_resync(&self, venue: Venue) {
+        assert_eq!(venue, Venue::Kalshi, "a gap names the venue it happened on");
         self.resyncs
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }

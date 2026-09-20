@@ -317,8 +317,14 @@ impl Feed for KalshiFeed {
         Box::pin(self.events.recv())
     }
 
-    fn request_resync(&self) {
-        KalshiFeed::request_resync(self);
+    fn venue(&self) -> Option<Venue> {
+        Some(Venue::Kalshi)
+    }
+
+    fn request_resync(&self, venue: Venue) {
+        if venue == Venue::Kalshi {
+            KalshiFeed::request_resync(self);
+        }
     }
 
     /// A copy of what the worker last published.

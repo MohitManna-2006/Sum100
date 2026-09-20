@@ -70,6 +70,11 @@ pub trait Feed: Send {
     /// two venues happen to be busy at once.
     fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>>;
 
+    /// The venue this feed carries, or `None` when it carries several.
+    fn venue(&self) -> Option<Venue> {
+        None
+    }
+
     /// Ask the venue for a fresh snapshot after a sequence gap.
     ///
     /// The default does nothing, which is right for a recorded stream: a replay
@@ -78,7 +83,12 @@ pub trait Feed: Send {
     /// overrides this to drop its socket and let the reconnect path deliver the
     /// snapshot. Having it on the trait means the engine loop handles a gap the
     /// same way for every feed instead of knowing which one it holds.
-    fn request_resync(&self) {}
+    ///
+    /// The venue is named because a gap is a fact about one subscription. A
+    /// feed carrying several must not drop the others' sockets to repair one:
+    /// their sequences came from different handshakes and are still intact, and
+    /// resyncing them throws away live books to fix a venue that was fine.
+    fn request_resync(&self, _venue: Venue) {}
 
     /// The feed's own counters as they stand now, for the dashboard.
     ///
@@ -89,5 +99,18 @@ pub trait Feed: Send {
     /// reach the dashboard as a flawless venue rather than an unmeasured one.
     fn metrics(&self) -> Option<Metrics> {
         None
+    }
+
+    /// Counters attributed to the venue that produced them.
+    ///
+    /// The dashboard reports health per venue, so a single total would show
+    /// both venues one sum and make a dead feed indistinguishable from a busy
+    /// one sitting beside it. A single-venue feed answers from [`Feed::venue`]
+    /// and [`Feed::metrics`]; a feed carrying several overrides this.
+    fn metrics_by_venue(&self) -> Vec<(Venue, Metrics)> {
+        match (self.venue(), self.metrics()) {
+            (Some(venue), Some(metrics)) => vec![(venue, metrics)],
+            _ => Vec::new(),
+        }
     }
 }

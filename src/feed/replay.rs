@@ -101,6 +101,10 @@ impl Feed for ReplayFeed {
         Box::pin(self.next_event())
     }
 
+    fn venue(&self) -> Option<Venue> {
+        Some(self.parser.venue)
+    }
+
     /// Read straight off the parser this feed owns. Replay has no worker task to
     /// publish through, and the counts are a function of the recorded bytes, so
     /// a dashboard driven by a replay shows exactly what the live run showed.

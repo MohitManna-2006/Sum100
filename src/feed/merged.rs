@@ -24,6 +24,7 @@
 use crate::{
     feed::{Feed, FeedEvent},
     metrics::Metrics,
+    types::Venue,
 };
 use std::{future::Future, pin::Pin};
 
@@ -79,16 +80,19 @@ impl Feed for MergedFeed {
         Box::pin(self.next_event())
     }
 
-    /// Ask every venue for a fresh snapshot.
-    ///
-    /// Coarser than it could be: the engine reports a gap without naming the
-    /// venue it happened on, so the only safe reading is that some venue needs
-    /// resynchronising. Resyncing a healthy venue costs a snapshot; missing the
-    /// one that gapped costs a wrong book.
-    fn request_resync(&self) {
+    /// Pass the request down; each child answers only for its own venue.
+    fn request_resync(&self, venue: Venue) {
         for feed in &self.feeds {
-            feed.request_resync();
+            feed.request_resync(venue);
         }
+    }
+
+    /// Each child's counters under its own venue.
+    fn metrics_by_venue(&self) -> Vec<(Venue, Metrics)> {
+        self.feeds
+            .iter()
+            .flat_map(|feed| feed.metrics_by_venue())
+            .collect()
     }
 
     /// The venues' counters, summed.

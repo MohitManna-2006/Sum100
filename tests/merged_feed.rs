@@ -12,7 +12,7 @@ use std::{
 use sum100::{
     feed::{Feed, FeedEvent, merged::MergedFeed},
     metrics::Metrics,
-    types::{ContractId, Side, TokenSide},
+    types::{ContractId, Side, TokenSide, Venue},
 };
 
 /// Yields prepared events, optionally pausing before each one.
@@ -225,4 +225,105 @@ async fn a_slow_venue_does_not_block_a_fast_one() {
         fast_done_before_first_slow >= 5,
         "fast venue delivered only {fast_done_before_first_slow} before the slow one"
     );
+}
+
+/// A resync is a fact about one subscription. Dropping the other venue's socket
+/// to repair it would discard live books to fix a venue that was never wrong.
+#[tokio::test]
+async fn a_resync_reaches_only_the_venue_it_names() {
+    struct Counting {
+        venue: Venue,
+        resyncs: Arc<AtomicUsize>,
+    }
+
+    impl Feed for Counting {
+        fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>> {
+            Box::pin(async { None })
+        }
+
+        fn venue(&self) -> Option<Venue> {
+            Some(self.venue)
+        }
+
+        fn request_resync(&self, venue: Venue) {
+            if venue == self.venue {
+                self.resyncs.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    let kalshi = Arc::new(AtomicUsize::new(0));
+    let polymarket = Arc::new(AtomicUsize::new(0));
+    let merged = MergedFeed::new(vec![
+        Box::new(Counting {
+            venue: Venue::Kalshi,
+            resyncs: Arc::clone(&kalshi),
+        }),
+        Box::new(Counting {
+            venue: Venue::Polymarket,
+            resyncs: Arc::clone(&polymarket),
+        }),
+    ]);
+
+    merged.request_resync(Venue::Kalshi);
+    assert_eq!(kalshi.load(Ordering::Relaxed), 1);
+    assert_eq!(polymarket.load(Ordering::Relaxed), 0, "left alone");
+
+    merged.request_resync(Venue::Polymarket);
+    assert_eq!(kalshi.load(Ordering::Relaxed), 1);
+    assert_eq!(polymarket.load(Ordering::Relaxed), 1);
+}
+
+/// Counters stay attributed to the venue that produced them. Reporting one
+/// total would make a dead feed beside a busy one look healthy.
+#[tokio::test]
+async fn counters_stay_attributed_to_their_own_venue() {
+    struct Venued {
+        venue: Venue,
+        messages: u64,
+    }
+
+    impl Feed for Venued {
+        fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>> {
+            Box::pin(async { None })
+        }
+
+        fn venue(&self) -> Option<Venue> {
+            Some(self.venue)
+        }
+
+        fn metrics(&self) -> Option<Metrics> {
+            Some(Metrics {
+                messages_received: self.messages,
+                ..Metrics::default()
+            })
+        }
+    }
+
+    let merged = MergedFeed::new(vec![
+        Box::new(Venued {
+            venue: Venue::Kalshi,
+            messages: 900,
+        }),
+        Box::new(Venued {
+            venue: Venue::Polymarket,
+            messages: 3,
+        }),
+    ]);
+
+    let by_venue = merged.metrics_by_venue();
+    assert_eq!(by_venue.len(), 2);
+    let kalshi = by_venue
+        .iter()
+        .find(|(venue, _)| *venue == Venue::Kalshi)
+        .unwrap();
+    let polymarket = by_venue
+        .iter()
+        .find(|(venue, _)| *venue == Venue::Polymarket)
+        .unwrap();
+    assert_eq!(kalshi.1.messages_received, 900);
+    assert_eq!(polymarket.1.messages_received, 3);
+
+    // The aggregate is still available for the summary line beside the panel.
+    assert_eq!(merged.metrics().unwrap().messages_received, 903);
 }

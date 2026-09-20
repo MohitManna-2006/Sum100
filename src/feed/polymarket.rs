@@ -358,8 +358,14 @@ impl Feed for PolymarketFeed {
         Box::pin(self.events.recv())
     }
 
-    fn request_resync(&self) {
-        PolymarketFeed::request_resync(self);
+    fn venue(&self) -> Option<Venue> {
+        Some(Venue::Polymarket)
+    }
+
+    fn request_resync(&self, venue: Venue) {
+        if venue == Venue::Polymarket {
+            PolymarketFeed::request_resync(self);
+        }
     }
 
     fn metrics(&self) -> Option<Metrics> {

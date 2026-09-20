@@ -272,11 +272,16 @@ pub struct Engine<S: OpportunitySink> {
     fees: FeeModels,
     config: EngineConfig,
     clock: Arc<dyn Clock>,
-    /// Set by a sequence gap, consumed by the run loop, which owns the feed.
-    resync_pending: bool,
-    /// Last counters read off the feed. The run loop owns the feed, and
-    /// [`Engine::state`] does not, so the reading is cached as it goes by.
-    feed_metrics: Option<Metrics>,
+    /// The venue a sequence gap was seen on, consumed by the run loop, which
+    /// owns the feed. Naming it keeps the repair to the subscription that
+    /// broke: the other venue's sequence came from its own handshake and is
+    /// still intact, so dropping its socket would discard live books to fix a
+    /// venue that was never wrong.
+    resync_pending: Option<Venue>,
+    /// Counters per venue, cached as the run loop sees them: it owns the feed
+    /// and [`Engine::state`] does not. Per venue rather than one total, so a
+    /// dead feed beside a busy one is visible as itself.
+    feed_metrics: Vec<(Venue, Metrics)>,
     pub portfolio: Portfolio,
     pub health: HealthMonitor,
     pub metrics: EngineMetrics,
@@ -303,12 +308,20 @@ impl<S: OpportunitySink> Engine<S> {
             fees,
             config,
             clock,
-            resync_pending: false,
-            feed_metrics: None,
+            resync_pending: None,
+            feed_metrics: Vec::new(),
             portfolio,
             health,
             metrics: EngineMetrics::default(),
         }
+    }
+
+    /// Counters this run has seen from one venue's feed.
+    fn venue_metrics(&self, venue: Venue) -> Option<Metrics> {
+        self.feed_metrics
+            .iter()
+            .find(|(seen, _)| *seen == venue)
+            .map(|(_, metrics)| *metrics)
     }
 
     pub fn registry(&self) -> &Registry {
@@ -349,8 +362,14 @@ impl<S: OpportunitySink> Engine<S> {
             // Do not repair the books. Ask for a fresh snapshot and evaluate
             // nothing until one lands: a book that is subtly wrong is the one
             // failure mode this system cannot tolerate.
-            self.resync_pending = true;
-            tracing::warn!(expected, got, "sequence gap; books held until resync");
+            // Only this venue's subscription is repaired.
+            self.resync_pending = self.book_store.venue_of(event);
+            tracing::warn!(
+                expected,
+                got,
+                venue = ?self.resync_pending,
+                "sequence gap; books held until resync"
+            );
         }
         if dirty.is_empty() {
             return Vec::new();
@@ -608,10 +627,10 @@ impl<S: OpportunitySink> Engine<S> {
         while let Some(event) = feed.next().await {
             // Before the step, so a frame the parser rejected is already counted
             // by the time the state built from this event goes out.
-            self.feed_metrics = feed.metrics();
+            self.feed_metrics = feed.metrics_by_venue();
             let opportunities = self.step(&event);
-            if std::mem::take(&mut self.resync_pending) {
-                feed.request_resync();
+            if let Some(venue) = self.resync_pending.take() {
+                feed.request_resync(venue);
                 self.book_store.note_resync_request();
                 self.metrics.resyncs_requested = self.metrics.resyncs_requested.saturating_add(1);
             }
@@ -691,7 +710,10 @@ impl<S: OpportunitySink> Engine<S> {
                         // One feed per venue, and only the venue it feeds may
                         // claim its counters. Attributing them to a venue that
                         // is not subscribed is how a dead venue reads as busy.
-                        feed: health.subscribed.then_some(self.feed_metrics).flatten(),
+                        feed: health
+                            .subscribed
+                            .then(|| self.venue_metrics(health.venue))
+                            .flatten(),
                     })
                     .collect(),
                 overall: self.health.overall(now_ms),
