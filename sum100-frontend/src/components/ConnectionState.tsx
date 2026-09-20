@@ -5,6 +5,7 @@ interface ConnectionStateProps {
   phase: ConnectionPhase
   error: string | null
   onReconnect: () => void
+  reconnectPending?: boolean
   banner?: boolean
 }
 
@@ -12,14 +13,20 @@ export function ConnectionState({
   phase,
   error,
   onReconnect,
+  reconnectPending = false,
   banner = false,
 }: ConnectionStateProps) {
   if (banner) {
     return (
       <div className={styles.banner} role="status">
         <span>{error || 'Live stream interrupted; displayed data is stale.'}</span>
-        <button className={styles.reconnect} type="button" onClick={onReconnect}>
-          Reconnect
+        <button
+          className={styles.reconnect}
+          type="button"
+          onClick={onReconnect}
+          disabled={reconnectPending}
+        >
+          {reconnectPending ? 'Starting…' : 'Reconnect'}
         </button>
       </div>
     )
@@ -28,6 +35,8 @@ export function ConnectionState({
   const waiting = phase === 'connected'
   const title = waiting
     ? 'Waiting for first update'
+    : phase === 'offline'
+      ? 'Engine stopped'
     : phase === 'reconnecting'
       ? 'Reconnecting to engine'
       : 'Connecting to engine'
@@ -41,8 +50,13 @@ export function ConnectionState({
           {error || 'Opening the live state stream on the configured API endpoint.'}
         </p>
         {phase !== 'connected' ? (
-          <button className={styles.reconnect} type="button" onClick={onReconnect}>
-            Reconnect now
+          <button
+            className={styles.reconnect}
+            type="button"
+            onClick={onReconnect}
+            disabled={reconnectPending}
+          >
+            {reconnectPending ? 'Starting engine…' : 'Reconnect now'}
           </button>
         ) : null}
       </div>

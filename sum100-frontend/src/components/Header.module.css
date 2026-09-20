@@ -116,6 +116,11 @@
   background: var(--color-neutral-1);
 }
 
+.reconnect:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 @media (max-width: 760px) {
   .header {
     min-height: 60px;

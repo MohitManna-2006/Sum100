@@ -13,8 +13,12 @@ The development server is available at `http://localhost:5173`.
 Set `VITE_API_URL` in `.env.local` when the engine API is not running at
 `http://localhost:8080`.
 
-Start the production read-only engine and dashboard WebSocket from the
-repository root:
+In development, **Reconnect now** asks the localhost-only Vite controller to
+build and start the read-only engine. A **Stop engine** action appears in the
+header only when that controller owns the process. The controller will not stop
+an engine started from another terminal.
+
+You can still start the engine manually from the repository root:
 
 ```sh
 cargo run --release -- scan --live --prod --registry config/registry.live.toml
