@@ -40,7 +40,10 @@ use crate::{
     feed::{Feed, FeedEvent},
     metrics::Metrics,
     record::{Control, Recorder},
-    types::{Cents, ContractId, Contracts, Level, Venue, parse_price_cents, parse_size_contracts},
+    types::{
+        Cents, ContractId, Contracts, Level, PriceParseError, Venue, parse_price_cents,
+        parse_size_contracts,
+    },
 };
 
 pub use crate::types::TokenSide;
@@ -267,6 +270,23 @@ impl Parser {
                     let Some(contract) = self.contracts.get(self.venue, &change.asset_id) else {
                         continue;
                     };
+                    // A price this book cannot hold costs its own level, not
+                    // the frame: one message carries updates for several
+                    // tokens, and dropping all of them would discard the
+                    // sibling's perfectly representable quote too.
+                    let price = match parse_price_cents(&change.price) {
+                        Ok(price) => price,
+                        Err(PriceParseError::SubCent) => {
+                            self.metrics.sub_cent_prices += 1;
+                            tracing::debug!(
+                                price = change.price,
+                                asset = change.asset_id,
+                                "quote finer than a cent; level left unchanged"
+                            );
+                            continue;
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
                     let mut discarded = 0;
                     changes.push(LevelSet {
                         contract,
@@ -275,7 +295,7 @@ impl Parser {
                             "SELL" => TokenSide::Ask,
                             other => bail!("unknown order side {other:?}"),
                         },
-                        price: parse_price_cents(&change.price)?,
+                        price,
                         size: parse_size_contracts(&change.size, &mut discarded)?,
                         hash: change.hash,
                     });

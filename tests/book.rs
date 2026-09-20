@@ -686,3 +686,44 @@ fn snapshot_with(
         venue_ts_ms: None,
     }
 }
+
+/// A level update this book cannot hold costs that level, and nothing else.
+///
+/// There is no sequence to fall behind on: `LevelSet` carries none, because the
+/// venue that sends it numbers nothing. So a refused update cannot put the book
+/// an increment behind the venue forever — it leaves that one price at its last
+/// known size, and the next update for it lands normally.
+#[test]
+fn a_refused_level_update_does_not_desynchronise_the_book() {
+    let mut store = polymarket_store();
+    let id = ContractId(0);
+    store.apply(&snapshot_with(id, 1, &[(55, 10), (56, 20)], &[]));
+    assert_eq!(store.expected_seq(Venue::Polymarket), Some(2));
+
+    // Whatever the feed refused never reaches the store, so the level keeps the
+    // size the snapshot gave it.
+    assert_eq!(store.get(id).unwrap().yes_size_at(55), Some(10));
+
+    // The next update it *can* represent applies as though nothing happened,
+    // and the expectation has not moved in the meantime.
+    assert_eq!(
+        store.apply(&FeedEvent::LevelSet {
+            contract: id,
+            side: TokenSide::Bid,
+            price: 55,
+            size: 777,
+            venue_ts_ms: 1_700,
+        }),
+        Applied::LevelSet(id)
+    );
+    let book = store.get(id).unwrap();
+    assert_eq!(book.yes_size_at(55), Some(777));
+    assert_eq!(
+        book.yes_size_at(56),
+        Some(20),
+        "untouched levels are intact"
+    );
+    assert_eq!(book.state, BookState::Live);
+    assert_eq!(store.expected_seq(Venue::Polymarket), Some(2));
+    assert_eq!(store.metrics.sequence_gaps, 0);
+}

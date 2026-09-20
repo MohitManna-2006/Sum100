@@ -251,14 +251,41 @@ fn an_unsubscribed_token_in_a_frame_is_skipped_quietly() {
 
 /// A tick finer than a cent is refused rather than rounded. These markets exist
 /// on Polymarket, and a rounded quote is one nobody made.
+///
+/// It is counted apart from a parse error, because the payload was understood
+/// perfectly: the price is one a whole-cent book has no slot for. Reporting it
+/// as malformed data would send an operator looking for a broken parser.
 #[test]
-fn a_sub_cent_price_is_rejected_not_rounded() {
+fn a_sub_cent_price_is_refused_and_counted_as_its_own_thing() {
     let mut parser = parser();
     let frame = format!(
         r#"{{"event_type":"price_change","timestamp":"1789921463565","price_changes":[{{"asset_id":"{YES}","price":"0.085","size":"100","side":"BUY","hash":"h"}}]}}"#
     );
     assert!(parser.parse(&frame, 1_000).is_none());
-    assert_eq!(parser.metrics.parse_errors, 1);
+    assert_eq!(parser.metrics.sub_cent_prices, 1);
+    assert_eq!(parser.metrics.parse_errors, 0, "understood, not malformed");
+}
+
+/// One frame carries both tokens. A price the book cannot hold costs its own
+/// level, not its sibling's: dropping the whole frame would discard a
+/// perfectly representable quote alongside the one that could not be used.
+#[test]
+fn an_unrepresentable_price_does_not_take_its_sibling_down_with_it() {
+    let mut parser = parser();
+    let frame = format!(
+        r#"{{"event_type":"price_change","timestamp":"1789921463565","price_changes":[
+            {{"asset_id":"{YES}","price":"0.085","size":"100","side":"BUY","hash":"a"}},
+            {{"asset_id":"{NO}","price":"0.92","size":"250","side":"SELL","hash":"b"}}
+        ]}}"#
+    );
+    let Some(Parsed::Levels { changes, .. }) = parser.parse(&frame, 1_000) else {
+        panic!("the representable half should still arrive");
+    };
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].price, 92);
+    assert_eq!(changes[0].size, 250);
+    assert_eq!(parser.metrics.sub_cent_prices, 1);
+    assert_eq!(parser.metrics.parse_errors, 0);
 }
 
 /// Informational message types are known and carry no book state, so they are

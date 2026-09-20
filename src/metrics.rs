@@ -21,6 +21,14 @@ pub struct Metrics {
     pub discarded_size_hundredths: u64,
     /// Snapshot sides whose key the venue omitted, applied as empty sides.
     pub snapshot_sides_absent: u64,
+    /// Quotes finer than one cent, which this book cannot hold.
+    ///
+    /// Counted apart from [`Metrics::parse_errors`] because it is not a parse
+    /// failure: the payload was understood perfectly, and the price is one the
+    /// engine's whole-cent book has no slot for. Conflating them reports a
+    /// venue quoting a finer tick as a venue sending malformed data, and the
+    /// two call for completely different responses.
+    pub sub_cent_prices: u64,
     /// Venue-to-local receipt latency buckets: <=1, 5, 10, 50, 100, 500, >500 ms.
     pub latency_buckets: [u64; 7],
     pub clock_skew_samples: u64,
