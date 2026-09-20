@@ -1,0 +1,14 @@
+sequence=1 received_at_ms=1789355961438 kind=control {"event":"session_started","environment":"production","tickers":["KXBTCD-26SEP1417-T76999.99","KXBTCD-26SEP1417-T77499.99","KXBTCD-26SEP1417-T77749.99","KXBTCD-26SEP1417-T77999.99"]}
+sequence=2 received_at_ms=1789355961697 kind=text subscribed seq=None 
+sequence=3 received_at_ms=1789355961697 kind=text orderbook_snapshot seq=1 KXBTCD-26SEP1417-T76999.99
+sequence=4 received_at_ms=1789355961697 kind=text orderbook_snapshot seq=2 KXBTCD-26SEP1417-T77499.99
+  ...
+sequence=579 received_at_ms=1789356001434 kind=text orderbook_delta seq=577 KXBTCD-26SEP1417-T76999.99
+sequence=580 received_at_ms=1789356001435 kind=text orderbook_delta seq=578 KXBTCD-26SEP1417-T77749.99
+sequence=581 received_at_ms=1789356481474 kind=control {"event":"disconnected","reason":"websocket idle timeout"}
+sequence=582 received_at_ms=1789356481930 kind=control {"event":"reconnected","attempt":0}
+sequence=583 received_at_ms=1789356481949 kind=text subscribed seq=None 
+sequence=584 received_at_ms=1789356481949 kind=control {"event":"resubscribed","tickers":["KXBTCD-26SEP1417-T76999.99","KXBTCD-26SEP1417-T77499.99","KXBTCD-26SEP1417-T77749.99","KXBTCD-26SEP1417-T77999.99"]}
+sequence=585 received_at_ms=1789356481949 kind=text orderbook_snapshot seq=1 KXBTCD-26SEP1417-T76999.99
+sequence=586 received_at_ms=1789356481949 kind=text orderbook_snapshot seq=2 KXBTCD-26SEP1417-T77499.99
+sequence=587 received_at_ms=1789356481949 kind=text orderbook_snapshot seq=3 KXBTCD-26SEP1417-T77749.99

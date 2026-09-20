@@ -1,0 +1,35 @@
+$ shasum -a 256 data/phase3-d/production/kalshi-2026-09-14.ndjson.gz
+74cfa726635cdc1ce65cd0868b5372ad135129c717567033f89b87b08fad0d48  data/phase3-d/production/kalshi-2026-09-14.ndjson.gz
+
+$ gzip -dc data/phase3-d/production/kalshi-2026-09-14.ndjson.gz | grep -o '"kind":"[a-z_0-9]*"' | sort | uniq -c
+ 680 "kind":"control"
+20579 "kind":"text"
+
+$ gzip -dc data/phase3-d/production/kalshi-2026-09-14.ndjson.gz | grep '"kind":"control"' | grep -o 'event[^,]*' | sort | uniq -c
+ 227 event\":\"disconnected
+ 226 event\":\"reconnected
+ 226 event\":\"resubscribed
+   1 event\":\"session_started
+
+$ sandbox-exec -p '(version 1)(allow default)(deny network*)' env -i NO_COLOR=1 /usr/bin/time -p ./target/release/sum100 replay --venue kalshi --file data/phase3-d/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file docs/phase-3-evidence/session-d/live.digest --digest-out docs/phase-3-evidence/session-d/replay-max.digest 2>replay-max.stderr | tail -n 5
+gap 26999 resynced KXBTCD-26SEP1417-T80999.99 seq=59
+gap 27000 resynced KXBTCD-26SEP1417-T81249.99 seq=60
+gap 27001 gap KXBTCD-26SEP1417-T78249.99 expected=61 got=81
+gap 27005 disconnected kalshi
+metrics events=27005 snapshots_applied=6506 deltas_applied=0 deltas_skipped_not_live=1965 sequence_gaps=227 resync_requests=227 negative_level_clamps=0 crossed_books_observed=0
+exit=0
+$ grep -E 'verify|^real|replay finished|book store metrics' docs/phase-3-evidence/session-d/replay-max.stderr
+2026-09-14T03:27:17.524031Z  INFO sum100::book: book store metrics self=BookMetrics { snapshots_applied: 6506, deltas_applied: 0, deltas_skipped_not_live: 1965, sequence_gaps: 227, resync_requests: 227, negative_level_clamps: 0, crossed_books_observed: 0 } uninitialized=0 resyncing=80 live=0
+2026-09-14T03:27:17.524043Z  INFO sum100: replay finished metrics=Metrics { messages_received: 20579, parse_errors: 11654, parse_attempts: 20579, unknown_messages: 0, reconnections: 0, bytes_recorded: 0, discarded_size_hundredths: 1032300, latency_buckets: [0, 0, 0, 0, 0, 0, 2192], clock_skew_samples: 0 }
+verify OK: 80 book hash(es) and gap log hash match
+real 1.03
+
+$ diff docs/phase-3-evidence/session-d/live.digest docs/phase-3-evidence/session-d/replay-max.digest && echo IDENTICAL
+IDENTICAL
+
+$ grep 'sequence gap' live.stderr | grep -o 'expected=[0-9]* got=[0-9]*' > live-gaps.txt
+$ grep 'sequence gap' replay-max.stderr | grep -o 'expected=[0-9]* got=[0-9]*' > replay-gaps.txt
+$ wc -l live-gaps.txt replay-gaps.txt; cmp live-gaps.txt replay-gaps.txt && echo GAP_WARN_SEQUENCE_IDENTICAL
+     227 live-gaps.txt
+     227 replay-gaps.txt
+GAP_WARN_SEQUENCE_IDENTICAL

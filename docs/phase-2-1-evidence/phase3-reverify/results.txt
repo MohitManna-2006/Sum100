@@ -1,0 +1,29 @@
+# binary built from 0f04b3e; sandboxed, env -i
+
+$ replay --venue kalshi --file data/phase3-a/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file docs/phase-3-evidence/session-a/live.digest --digest-out docs/phase-2-1-evidence/phase3-reverify/session-a.digest
+parse_errors: 0 snapshot_sides_absent: 0 verify OK: 4 book hash(es) and gap log hash match exit=0
+$ diff docs/phase-3-evidence/session-a/live.digest docs/phase-2-1-evidence/phase3-reverify/session-a.digest && echo IDENTICAL
+IDENTICAL
+
+$ replay --venue kalshi --file data/phase3-b/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file docs/phase-3-evidence/session-b/live.digest --digest-out docs/phase-2-1-evidence/phase3-reverify/session-b.digest
+parse_errors: 0 snapshot_sides_absent: 0 verify OK: 4 book hash(es) and gap log hash match exit=0
+$ diff docs/phase-3-evidence/session-b/live.digest docs/phase-2-1-evidence/phase3-reverify/session-b.digest && echo IDENTICAL
+IDENTICAL
+
+$ replay --venue kalshi --file data/phase3-c/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file docs/phase-3-evidence/session-c/live.digest --digest-out docs/phase-2-1-evidence/phase3-reverify/session-c.digest
+parse_errors: 0 snapshot_sides_absent: 0 verify OK: 4 book hash(es) and gap log hash match exit=0
+$ diff docs/phase-3-evidence/session-c/live.digest docs/phase-2-1-evidence/phase3-reverify/session-c.digest && echo IDENTICAL
+IDENTICAL
+
+$ replay --file data/stage2-validation/production/kalshi-2026-09-13.ndjson.gz --tickers KXBTCD-26SEP1417-T76999.99 --verify --expect-book KXBTCD-26SEP1417-T76999.99=a7a999017e785ef5c2f192665d6e73d4f0bbad0408d1a79c41d3e00ba45b4f89 --expect-gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+verify OK: 1 book hash(es) and gap log hash match
+exit=0
+
+$ replay --file data/stage2-final-validation/production/kalshi-2026-09-13.ndjson.gz --tickers KXBTCD-26SEP1417-T76999.99 --verify --expect-book KXBTCD-26SEP1417-T76999.99=b91985ca94d968731bdd60d22bc1c5b6883eba1b92df5c0b9187dfdc6a18f596 --expect-gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+verify OK: 1 book hash(es) and gap log hash match
+exit=0
+
+$ replay --file data/production/kalshi-2026-09-14.ndjson.gz --tickers YOUR-OPEN-TICKER,KXBTCD-26SEP1417-T76999.99 --verify --expect-book YOUR-OPEN-TICKER=f10022fff2bf83d478d4a88545695ff95056d9fce23455a067a727b45682e92f --expect-book KXBTCD-26SEP1417-T76999.99=8203ff840b8cafae9872422da29ab0a787a5816b092ba312a534e72c51e6af77 --expect-gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+2026-09-14T04:13:03.141894Z  WARN sum100::feed::kalshi: venue payload rejected error=snapshot has neither side raw="{\"type\":\"orderbook_snapshot\",\"sid\":1,\"seq\":1,\"msg\":{\"market_ticker\":\"YO
+verify OK: 2 book hash(es) and gap log hash match
+exit=0

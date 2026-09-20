@@ -1,0 +1,105 @@
+.strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(82px, 1fr));
+  border: var(--border);
+  background: var(--color-neutral-0);
+}
+
+.metric {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 12px var(--spacing-md);
+  border-right: var(--border);
+}
+
+.metric:last-child {
+  border-right: 0;
+}
+
+.label {
+  overflow: hidden;
+  color: var(--color-neutral-3);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.value {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-neutral-4);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  background: var(--color-accent-loss);
+  border-radius: 50%;
+}
+
+.connected {
+  background: var(--color-accent-gain);
+}
+
+.compact {
+  border: 0;
+  background: transparent;
+}
+
+.compact .metric {
+  min-width: 74px;
+  padding: 0 12px;
+}
+
+.compact .metric:first-child {
+  padding-left: 0;
+}
+
+.compact .metric:last-child {
+  padding-right: 0;
+}
+
+.compact .label {
+  font-size: 10px;
+}
+
+.compact .value {
+  font-size: var(--font-size-xs);
+}
+
+@media (max-width: 900px) {
+  .compact .metric:nth-child(2),
+  .compact .metric:nth-child(3) {
+    display: none;
+  }
+}
+
+@media (max-width: 650px) {
+  .strip:not(.compact) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .strip:not(.compact) .metric {
+    border-bottom: var(--border);
+  }
+
+  .strip:not(.compact) .metric:nth-child(even) {
+    border-right: 0;
+  }
+
+  .strip:not(.compact) .metric:last-child {
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .compact .metric:not(:first-child) {
+    display: none;
+  }
+}

@@ -11,6 +11,8 @@ pub struct Metrics {
     pub bytes_recorded: u64,
     /// Exact hundredths discarded by mathematical floor, including signed deltas.
     pub discarded_size_hundredths: u64,
+    /// Snapshot sides whose key the venue omitted, applied as empty sides.
+    pub snapshot_sides_absent: u64,
     /// Venue-to-local receipt latency buckets: <=1, 5, 10, 50, 100, 500, >500 ms.
     pub latency_buckets: [u64; 7],
     pub clock_skew_samples: u64,

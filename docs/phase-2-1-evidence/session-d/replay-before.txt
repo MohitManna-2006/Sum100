@@ -1,0 +1,10 @@
+# binary built from 712eb42
+$ sandbox-exec -p '(version 1)(allow default)(deny network*)' env -i NO_COLOR=1 /private/tmp/claude-501/-Users-mohitmanna-Desktop-Projects-Sum100/e2aba5fd-04b6-4484-b4e4-91a427f9bb94/scratchpad/wt-712eb42/target/release/sum100 replay --venue kalshi --file data/phase3-d/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file docs/phase-3-evidence/session-d/live.digest (decompressed) --digest-out docs/phase-2-1-evidence/session-d/before.digest
+exit=0
+INFO sum100::book: book store metrics self=BookMetrics { snapshots_applied: 6506, deltas_applied: 0, deltas_skipped_not_live: 1965, sequence_gaps: 227, resync_requests: 227, negative_level_clamps: 0, crossed_books_observed: 0 } uninitialized=0 resyncing=80 live=0
+INFO sum100: replay finished metrics=Metrics { messages_received: 20579, parse_errors: 11654, parse_attempts: 20579, unknown_messages: 0, reconnections: 0, bytes_recorded: 0, discarded_size_hundredths: 1032300, latency_buckets: [0, 0, 0, 0, 0, 0, 2192], clock_skew_samples: 0 }
+verify OK: 80 book hash(es) and gap log hash match
+verify FAILED book lines: 0
+gaps a853803b9a454cfb2b4ac32272133fc936ce75e1472362d174dc34456ed7cefc
+metrics events=27005 snapshots_applied=6506 deltas_applied=0 deltas_skipped_not_live=1965 sequence_gaps=227 resync_requests=227 negative_level_clamps=0 crossed_books_observed=0
+gap log entries by kind:  227 disconnected; 227 gap;18080 resubscribed;6477 resynced;

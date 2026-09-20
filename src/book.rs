@@ -4,11 +4,16 @@
 //! gap on any ticker invalidates every live book on that subscription. The
 //! store never calls back into the feed; on [`Applied::Gap`] the driver must
 //! request a resync.
+//!
+//! `updated_at_ms` comes from the injected [`Clock`] (local time live, recorded
+//! receipt time under replay), never from the venue timestamp on the event.
 
 use crate::{
+    clock::Clock,
     feed::FeedEvent,
     types::{Book, BookApplyError, BookState, ContractId, Contracts, Venue},
 };
+use std::sync::Arc;
 
 /// Outcome of applying one [`FeedEvent`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,12 +69,13 @@ pub struct BookStore {
     contracts: Contracts,
     /// Next expected subscription sequence after the last accepted message.
     expected_seq: Option<u64>,
+    clock: Arc<dyn Clock>,
     pub metrics: BookMetrics,
 }
 
 impl BookStore {
     /// Intern tickers in the same order as [`crate::feed::kalshi::Parser::new`].
-    pub fn new(venue: Venue, tickers: &[String]) -> anyhow::Result<Self> {
+    pub fn new(venue: Venue, tickers: &[String], clock: Arc<dyn Clock>) -> anyhow::Result<Self> {
         let mut contracts = Contracts::default();
         let mut books = Vec::with_capacity(tickers.len());
         for ticker in tickers {
@@ -80,6 +86,7 @@ impl BookStore {
             books,
             contracts,
             expected_seq: None,
+            clock,
             metrics: BookMetrics::default(),
         })
     }
@@ -111,16 +118,23 @@ impl BookStore {
                 yes,
                 no,
                 seq,
-                ts_ms,
-            } => self.apply_snapshot(*contract, yes, no, *seq, *ts_ms),
+                venue_ts_ms: _,
+            } => self.apply_snapshot(*contract, yes, no, *seq, self.clock.now_ms()),
             FeedEvent::Delta {
                 contract,
                 side,
                 price,
                 size_delta,
                 seq,
-                ts_ms,
-            } => self.apply_delta(*contract, *side, *price, *size_delta, *seq, *ts_ms),
+                venue_ts_ms: _,
+            } => self.apply_delta(
+                *contract,
+                *side,
+                *price,
+                *size_delta,
+                *seq,
+                self.clock.now_ms(),
+            ),
             FeedEvent::Disconnected { .. } => {
                 self.invalidate_all();
                 Applied::Invalidated
@@ -244,5 +258,20 @@ impl BookStore {
             book.mark_resyncing();
         }
         self.expected_seq = None;
+    }
+}
+
+/// The solver reads books and engine time through the store.
+///
+/// Time comes from the same injected clock that stamps `updated_at_ms`, so the
+/// freshness gate compares two readings of one clock. Reading wall time in the
+/// solver instead would make replay disagree with the live run it replays.
+impl crate::solver::BookSource for BookStore {
+    fn book(&self, contract: ContractId) -> Option<&Book> {
+        self.get(contract)
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.clock.now_ms()
     }
 }

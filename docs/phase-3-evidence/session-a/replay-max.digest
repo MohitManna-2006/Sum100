@@ -1,0 +1,7 @@
+# sum100 state digest v1 (timestamps excluded)
+book KXBTCD-26SEP1417-T76999.99 c20d1d24b54ffd9071c19cb7413c63cfbe000b0f5b144f95f60c393d4a597262
+book KXBTCD-26SEP1417-T77499.99 bd6db36d7d6b8ec7496328e6d035d405c5a5b74ed997694ce49041f737d6f071
+book KXBTCD-26SEP1417-T77749.99 58744e6ebc3e2f056a0b8cb66cefbb6d4681fc98159aa3e13acde710fcbd39b5
+book KXBTCD-26SEP1417-T77999.99 5b23939eef0583537bc6b8d2b130a8ca92fce6ffa1e73d6dacca1ed18f6b635d
+gaps e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+metrics events=3889 snapshots_applied=4 deltas_applied=3885 deltas_skipped_not_live=0 sequence_gaps=0 resync_requests=0 negative_level_clamps=4 crossed_books_observed=0

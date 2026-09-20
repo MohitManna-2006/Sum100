@@ -48,6 +48,44 @@ Payload SHA-256 values:
 | stage2-live-orderbook.ndjson | `0887f5030dfb03e35a0e930f76945b163cce2ccdd808f9ee5828e2459083df8c` |
 | no-side-delta.json | `de4efc7d3f6908347be654e9b75e91ed2479b876fc88f1e2c63325c20072ca2a` |
 
-The corpus files stay on disk so phase 3 can reuse them. Test-only malformed
+## Phase 3 disconnect session
+
+- `phase3-disconnect-session.ndjson.gz`: the unmodified daily file written by a
+  production `dump` of `KXBTCD-26SEP1417-T76999.99`, `-T77499.99`, `-T77749.99`,
+  and `-T77999.99`, started September 14, 2026 at 03:19:21 UTC. The process was
+  suspended with SIGSTOP from 03:20:01 to 03:28:01 UTC; on resume the feed's
+  45-second idle watchdog dropped the websocket, reconnected, resubscribed, and
+  received four fresh snapshots. 2,282 text envelopes and 4 control envelopes
+  (`session_started`, `disconnected`, `reconnected`, `resubscribed`).
+- `phase3-disconnect-session.digest`: the state digest that live run wrote with
+  `--digest-out` before replay existed for it. `recorded_disconnect_session_replays_to_live_digest`
+  requires replay to render it byte for byte.
+
+| File | SHA-256 |
+| --- | --- |
+| phase3-disconnect-session.ndjson.gz | `7d092c75fc4dad8fd530e61d3c23bf1323c74268b4419dff824e554d936ee97e` |
+| phase3-disconnect-session.digest | `e4309003f6635844e53970732fa585ce8edecd93c2b1bf3e3194cba39bf2eb9f` |
+
+Evidence and commands: [docs/phase-3-summary.md](../../docs/phase-3-summary.md).
+
+## Phase 2.1 one-sided snapshots
+
+- `phase3-d-one-sided-snapshots.ndjson.gz`: 155 envelope lines copied byte for
+  byte from `data/phase3-d/production/kalshi-2026-09-14.ndjson.gz` (source SHA-256
+  `74cfa726635cdc1ce65cd0868b5372ad135129c717567033f89b87b08fad0d48`): recorder
+  sequence 1 (`session_started`, 80 `KXBTCD-26SEP1417` strikes), then the text
+  envelopes of one connection, sequence 16878–17032 (ack, 80 snapshots at venue seq
+  1–80, 73 deltas at seq 81–153, received 03:25:55.909–03:25:56.435 UTC). That
+  connection's `reconnected` (16877), `resubscribed` (16879), and `disconnected`
+  (17033) control envelopes are omitted so the slice replays as one fresh session.
+  31 snapshots omit `no_dollars_fp` and 20 omit `yes_dollars_fp`; 70 deltas are
+  on those one-sided strikes. Lines were not re-serialized; the gzip is written with
+  mtime 0. Live, this connection hit a false gap and a forced reconnect.
+
+| File | SHA-256 |
+| --- | --- |
+| phase3-d-one-sided-snapshots.ndjson.gz | `0501b38367cd67c7d0d22f02569b3f65028c8799f8312b7e5a73d5edaa2fee7c` |
+
+The corpus files stay on disk so later phases can reuse them. Test-only malformed
 payloads are deliberate mutations, clearly separated from captured fixtures.
 No credentials or private API payloads are included.

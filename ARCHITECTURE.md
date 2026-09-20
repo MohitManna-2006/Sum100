@@ -6,8 +6,12 @@ Status: target architecture; implementation is through phase 2 (book store).
 The imported design originally used the working name Parity. The repository and
 binary remain Sum100. The current runnable interface and verification evidence
 are in [README.md](README.md); [PLAN.md](PLAN.md) separates completed work from
-future milestones. Later examples in this document (registry, replay, API,
-frontend) describe target components not yet present.
+future milestones. The estimation path — a parallel consumer of the book store
+that never feeds the solver — is specified in [docs/COHERENCE.md](docs/COHERENCE.md).
+Later examples in this document (registry, replay, API, frontend) describe target
+components not yet present. Operator recipes live in the root `Makefile` and wrap
+`cargo run --release --`; they are not part of the engine and do not change clap
+flags, pin a ticker, or select production except on explicit `*-prod` targets.
 
 ---
 
@@ -38,7 +42,7 @@ Sum100 watches prediction market order books and detects when the prices of logi
 ### Explicit non-goals
 
 - Placing real orders. The executor is a simulator by design, not by omission.
-- Predicting event outcomes. Sum100 has no view on whether the Fed cuts rates.
+- Predicting event outcomes. Sum100 has no view on whether the Fed cuts rates. The coherence engine is a minimum-distance correction of the market's own numbers, not a forecast; see [docs/COHERENCE.md](docs/COHERENCE.md).
 - Supporting more than two venues initially. The feed trait makes adding a third cheap, but breadth before depth would be a mistake.
 - Horizontal scaling. One process comfortably handles the entire universe of contracts on both venues. Distributing it would add failure modes and buy nothing.
 
@@ -151,22 +155,39 @@ pub struct ContractBinding {
 pub enum Relation {
     Complement { contract: ContractId },
     Exhaustive { members: Vec<ContractId> },
+    Monotone { ordered: Vec<ContractId> },   // threshold ladder, weakest claim first
     Implies { antecedent: ContractId, consequent: ContractId },
-    Equivalent { a: ContractId, b: ContractId },
+    Equivalent { a: ContractId, b: ContractId, verified: bool },
 }
 
 pub struct ConstraintGroup {
     pub id: GroupId,
     pub relation: Relation,
-    pub members: Vec<ContractId>,
+    pub members: Vec<ContractId>,            // derived from relation at construction
+    pub resolves_at_ms: u64,
 }
 ```
+
+`Monotone` was added in phase 4 so an N-rung ladder is one group evaluated on a single
+dirty mark rather than N-1 overlapping `Implies` pairs; `Implies` is its two-rung case and
+dispatches to the same check. `Relation::resolution_states` enumerates every resolution a
+relation permits, and that enumeration — not a hardcoded payoff — is what the solver
+prices every signal against. It is also the state space the general fallback would use.
 
 `verified` defaults to false. An unverified binding never produces a cross-venue signal. Promotion to verified requires a human confirming that both contracts settle on the same source, at the same time, with the same tie-handling. This is discussed further in section 7.
 
 ---
 
 ## 4. Component design
+
+### 4.0 Operator interface
+
+The runnable binary is `sum100` (`src/main.rs`). Subcommands `record`, `dump`,
+`replay`, `probe`, and `markets` are clap; demo is the CLI default and production
+is `--prod` only. A root `Makefile` wraps `cargo run --release --` for the
+recipes in the README. It is sugar: same flags, no pinned ticker, production only
+on `*-prod` targets. `make help` lists knobs. The Makefile is not part of the
+engine; CI still invokes cargo directly.
 
 ### 4.1 Feed layer
 
@@ -180,20 +201,24 @@ pub trait Feed: Send {
 }
 
 pub enum FeedEvent {
-    Snapshot { contract: ContractId, yes: Vec<Level>, no: Vec<Level>, seq: u64, ts_ms: u64 },
-    Delta    { contract: ContractId, side: Side, price: Cents, size_delta: i64, seq: u64, ts_ms: u64 },
+    Snapshot { contract: ContractId, yes: Vec<Level>, no: Vec<Level>, seq: u64, venue_ts_ms: Option<u64> },
+    Delta    { contract: ContractId, side: Side, price: Cents, size_delta: i64, seq: u64, venue_ts_ms: u64 },
     Disconnected { venue: Venue },
     Resubscribed { contract: ContractId },
 }
 ```
 
-KalshiFeed implements this trait now. PolymarketFeed and ReplayFeed are planned.
-Snapshots preserve both resting outcome sides; deltas preserve wire yes/no and
+KalshiFeed and ReplayFeed (phase 3) implement this trait now. PolymarketFeed is planned.
+Snapshots preserve both resting outcome sides; a side whose key Kalshi omits
+(far strikes) is an empty side, while both keys absent remains a schema error.
+Deltas preserve wire yes/no and
 signed changes. The feed performs no no-price complement conversion. Phase 2's
-book store owns book state and `100 - P`. Snapshot timestamps without a
-venue timestamp use the recorded local receipt time.
+book store owns book state and `100 - P`. `venue_ts_ms` is only the venue's own
+timestamp (Kalshi snapshots carry none, so it is `None` there); local receipt time
+never fills it and comes from the injected clock instead. It is kept for clock-skew
+tracking and also survives in the raw recorded payloads.
 
-**KalshiFeed.** Holds a websocket connection to Kalshi's trade API. The order book delta channel is private and requires request signing with an RSA key, so the feed constructs headers containing a key id, a timestamp in milliseconds, and a signature over the concatenation of timestamp, method, and path. Every WebSocket handshake requires signing, including public ticker and trade channels. Demo and production require separate credentials; demo remains the default and production requires `--prod`. Kalshi sends a full snapshot on subscription and incremental deltas thereafter, each carrying a sequence number.
+**KalshiFeed.** Holds a websocket connection to Kalshi's trade API. The order book delta channel is private and requires request signing with an RSA key, so the feed constructs headers containing a key id, a timestamp in milliseconds, and a signature over the concatenation of timestamp, method, and path. Every WebSocket handshake requires signing, including public ticker and trade channels. Demo and production require separate credentials; demo remains the default and production requires `--prod` (Makefile `*-prod` targets). Kalshi sends a full snapshot on subscription and incremental deltas thereafter, each carrying a sequence number.
 
 **PolymarketFeed.** Polymarket exposes three separate APIs. Gamma provides public market discovery and metadata. The CLOB provides the live order book and requires wallet-based signing only for order placement, not for reading. A separate data API provides historical activity. Sum100 uses Gamma for discovery and the CLOB websocket for live books. Note that the CLOB migrated to a V2 contract in April 2026, changing a substantial portion of the order struct and the collateral token, so any older integration example should be treated as wrong.
 
@@ -225,11 +250,11 @@ Its central responsibility is sequence continuity at the venue subscription scop
 
 Snapshots are absolute and always applied. There is no attempt to repair or interpolate. The cost of a wrong book is a false signal that would lose money, and the cost of a brief blind spot is one missed opportunity out of thousands. Sequence tracking is currently for the single orderbook subscription the feed opens; multiple concurrent `sid`s are not yet modeled.
 
-After applying an update, a future registry will mark every constraint group containing that contract as dirty and hand the dirty set to the solver. Dirty marking is not yet implemented.
+After applying an update, every constraint group containing that contract is marked dirty and the dirty set is handed to the solver. Phase 4 implements the registry side of that (the reverse index and `Solver::evaluate`); the book store does not yet emit a dirty set of its own, so the engine loop that connects the two arrives with registry loading in phase 5.
 
 ### 4.3 Registry
 
-The registry is a load-time structure built from `config/registry.toml` plus discovery calls to each venue's market listing endpoint.
+The registry is a load-time structure built from `config/registry.toml` plus discovery calls to each venue's market listing endpoint. `src/registry.rs` implements the in-memory structure, the relation semantics, and the reverse index, and validates group shape at construction. Loading the file is phase 5.
 
 ```toml
 [[event]]
@@ -264,7 +289,7 @@ At load time the registry builds a reverse index from contract to the groups con
 
 ### 4.4 Solver
 
-The solver receives a dirty set and evaluates each group.
+The solver receives a dirty set and evaluates each group. Implemented in `src/solver/` (phase 4), reading books and engine time through a `BookSource` trait that `BookStore` satisfies.
 
 #### Fast paths
 
@@ -274,7 +299,7 @@ Four constraint shapes cover the overwhelming majority of real groups, and each 
 
 **Exhaustive set.** Sum the best asks across all members. If the total plus fees is under 100 cents, buying one of each guarantees a dollar.
 
-**Monotonicity.** For a ladder ordered by threshold, prices must be non-increasing. Any adjacent inversion is a violation, capturable by buying the cheaper stronger claim and selling the dearer weaker one.
+**Monotonicity.** For a ladder ordered by threshold, prices must be non-increasing. Any adjacent inversion is a violation, capturable by buying the cheaper *weaker* claim and selling the dearer stronger one. (An earlier draft of this line had the two the wrong way round; a violation means the lower threshold is the cheap side, and the reversed position pays nothing in one state. See docs/phase-4-summary.md §3.)
 
 **Cross venue equivalence.** For a verified pair, if buying yes on one venue and no on the other costs under 100 cents combined, the position is riskless.
 
@@ -295,7 +320,9 @@ A violation is a candidate, not a signal. Costing turns one into the other.
 3. **Fee application.** Apply the venue fee model per level consumed. Rounding up per level slightly over-counts relative to venues that round once per order. Over-counting is deliberately the safe direction.
 4. **Freshness gate.** Every participating book must be `Live` and updated within `max_book_age_ms`.
 5. **Net edge.** Guaranteed payoff minus total cost minus total fees. If this is not strictly positive, discard.
-6. **Ranking.** Compute annualized return as net divided by capital, scaled by 365 over days to resolution.
+6. **Ranking.** Compute annualized return as net divided by capital, scaled by 365 over days to resolution. The horizon is floored at one hour so a near-resolution trade cannot divide a real edge by nearly zero and dominate the ranking with a return that cannot be realized.
+
+Within the thinnest-leg cap the executable quantity is the one maximizing net profit, not the cap itself: deeper levels cost more while the guaranteed payoff per contract is fixed, so costing only the full cap would discard arbitrages whose edge exists only near the top of book. Net profit is monotone inside a level, so evaluating level boundaries is exact. Where every level is profitable the answer is the cap.
 
 ### 4.5 Fee models
 
@@ -334,7 +361,10 @@ Only one trailing LF is removed from text. Decoding the envelope restores the
 original payload bytes under that single-LF rule. Completed gzip members are
 flushed and synced every two seconds and at graceful shutdown. An OS lock
 prevents concurrent writers; append validates the existing daily corpus and
-continues its sequence. See README for crash-tail recovery and reader details.
+continues its sequence. Feed lifecycle events with no venue bytes (session start,
+disconnect, reconnect, resubscribe) are written into the same stream as `control`
+envelopes so replay reproduces the live resync path; older files simply lack them.
+See README for crash-tail recovery and reader details.
 
 File format is deliberately boring. It is greppable, streamable, compresses well, and requires no schema migration. When the corpus grows large enough that analysis is slow, the answer is to load it into Polars or DuckDB from a Python notebook, not to build query infrastructure in Rust.
 
@@ -494,7 +524,7 @@ Metrics collected continuously and exposed both on the health endpoint and in th
 
 **Decision.** In-process bounded channels.
 
-**Reasoning.** The entire contract universe across both venues is in the low thousands. Peak message rate is well within what a single core can parse. A broker would add a network hop, a serialization round trip, an operational dependency, and a new failure mode, in exchange for a scaling headroom the system will never approach. The correct engineering answer to a capacity question is to measure first, and the current single-process design is the starting point; throughput and latency claims require the phase 10 benchmarks.
+**Reasoning.** The entire contract universe across both venues is in the low thousands. Peak message rate is well within what a single core can parse. A broker would add a network hop, a serialization round trip, an operational dependency, and a new failure mode, in exchange for a scaling headroom the system will never approach. The correct engineering answer to a capacity question is to measure first, and the current single-process design is the starting point; throughput and latency claims require the phase 12 benchmarks.
 
 **Consequences.** Restarting the process loses in-flight state, which is acceptable because books resynchronize from snapshots within seconds. Scaling beyond one process would require real work, which is the right trade when that day is unlikely to arrive.
 

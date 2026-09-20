@@ -19,6 +19,7 @@ use rsa::pkcs8::DecodePrivateKey;
 use rsa::pss::SigningKey;
 use rsa::signature::{RandomizedSigner, SignatureEncoding};
 use sha2::Sha256;
+use sum100::clock::{Clock, WallClock};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -103,7 +104,7 @@ async fn main() -> Result<()> {
     // session when it is far harder to attribute.
     let key = load_key(&key_path)?;
 
-    let timestamp_ms = chrono::Utc::now().timestamp_millis();
+    let timestamp_ms = i64::try_from(WallClock.now_ms())?;
     let signature = sign(&key, timestamp_ms, "GET", WS_PATH);
 
     let mut request = url.into_client_request()?;

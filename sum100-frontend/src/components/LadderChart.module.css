@@ -1,0 +1,48 @@
+.chart {
+  width: 100%;
+  min-height: 240px;
+  overflow: visible;
+}
+
+.guide {
+  stroke: var(--color-neutral-2);
+  stroke-width: 1;
+}
+
+.axisLabel,
+.tickLabel {
+  fill: var(--color-neutral-3);
+  font-family: var(--font-family-sans);
+  font-size: 10px;
+}
+
+.tickLabel {
+  font-family: var(--font-family-mono);
+}
+
+.line {
+  fill: none;
+  stroke: var(--color-accent-info);
+  stroke-width: 2;
+}
+
+.violationLine {
+  stroke: var(--color-accent-loss);
+}
+
+.point {
+  fill: var(--color-neutral-0);
+  stroke: var(--color-accent-info);
+  stroke-width: 2;
+}
+
+.violated {
+  fill: var(--color-accent-loss);
+  stroke: var(--color-accent-loss);
+}
+
+.value {
+  fill: var(--color-neutral-4);
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+}

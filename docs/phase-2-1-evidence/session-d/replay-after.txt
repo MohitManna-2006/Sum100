@@ -1,0 +1,10 @@
+# binary built from 0f04b3e
+$ sandbox-exec -p '(version 1)(allow default)(deny network*)' env -i NO_COLOR=1 ./target/release/sum100 replay --venue kalshi --file data/phase3-d/production/kalshi-2026-09-14.ndjson.gz --verify --expect-file docs/phase-3-evidence/session-d/live.digest (decompressed) --digest-out docs/phase-2-1-evidence/session-d/after.digest
+exit=1
+INFO sum100::book: book store metrics self=BookMetrics { snapshots_applied: 18160, deltas_applied: 2192, deltas_skipped_not_live: 0, sequence_gaps: 0, resync_requests: 0, negative_level_clamps: 0, crossed_books_observed: 0 } uninitialized=0 resyncing=80 live=0
+INFO sum100: replay finished metrics=Metrics { messages_received: 20579, parse_errors: 0, parse_attempts: 20579, unknown_messages: 0, reconnections: 0, bytes_recorded: 0, discarded_size_hundredths: 1153404, snapshot_sides_absent: 11654, latency_buckets: [0, 0, 0, 0, 0, 0, 2192], clock_skew_samples: 0 }
+verify FAILED gaps: expected a853803b9a454cfb2b4ac32272133fc936ce75e1472362d174dc34456ed7cefc, got be853c978e23d41ccebf669eb3c74853ec4716dfa8c1a962ec37f97c1a1f6583
+verify FAILED book lines: 55
+gaps be853c978e23d41ccebf669eb3c74853ec4716dfa8c1a962ec37f97c1a1f6583
+metrics events=38659 snapshots_applied=18160 deltas_applied=2192 deltas_skipped_not_live=0 sequence_gaps=0 resync_requests=0 negative_level_clamps=0 crossed_books_observed=0
+gap log entries by kind:  227 disconnected;18080 resubscribed;18080 resynced;

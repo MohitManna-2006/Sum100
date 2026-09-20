@@ -1,8 +1,9 @@
 //! Public GET endpoints only. Both lists follow cursor pagination.
 use super::kalshi::Environment;
+use crate::clock::Clock;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Event {
     pub event_ticker: String,
@@ -28,14 +29,16 @@ struct Markets {
 pub struct Rest {
     client: reqwest::Client,
     env: Environment,
+    clock: Arc<dyn Clock>,
 }
 impl Rest {
-    pub fn new(env: Environment) -> Result<Self> {
+    pub fn new(env: Environment, clock: Arc<dyn Clock>) -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(20))
                 .build()?,
             env,
+            clock,
         })
     }
     async fn get<T: serde::de::DeserializeOwned>(
@@ -63,9 +66,8 @@ impl Rest {
                             chrono::DateTime::parse_from_rfc2822(value)
                                 .ok()
                                 .map(|date| {
-                                    date.timestamp()
-                                        .saturating_sub(chrono::Utc::now().timestamp())
-                                        .max(0) as u64
+                                    let now_s = (self.clock.now_ms() / 1000) as i64;
+                                    date.timestamp().saturating_sub(now_s).max(0) as u64
                                 })
                         })
                     });

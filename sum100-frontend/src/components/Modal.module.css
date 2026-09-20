@@ -1,0 +1,66 @@
+.backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  padding: var(--spacing-md);
+  background: rgba(0, 0, 0, 0.76);
+  place-items: center;
+}
+
+.dialog {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid #3a3a3a;
+  background: var(--color-neutral-0);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: 14px var(--spacing-md);
+  border-bottom: var(--border);
+}
+
+.title {
+  margin: 0;
+  color: var(--color-neutral-4);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: var(--border);
+  border-radius: 4px;
+  color: var(--color-neutral-3);
+  background: transparent;
+  font-family: var(--font-family-mono);
+}
+
+.close:hover {
+  color: var(--color-neutral-4);
+  background: var(--color-neutral-1);
+}
+
+.body {
+  padding: var(--spacing-md);
+}
+
+@media (max-width: 600px) {
+  .backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .dialog {
+    width: 100%;
+    max-height: 88vh;
+    border-width: 1px 0 0;
+  }
+}
