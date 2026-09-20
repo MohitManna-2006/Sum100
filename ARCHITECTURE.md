@@ -155,16 +155,24 @@ pub struct ContractBinding {
 pub enum Relation {
     Complement { contract: ContractId },
     Exhaustive { members: Vec<ContractId> },
+    Monotone { ordered: Vec<ContractId> },   // threshold ladder, weakest claim first
     Implies { antecedent: ContractId, consequent: ContractId },
-    Equivalent { a: ContractId, b: ContractId },
+    Equivalent { a: ContractId, b: ContractId, verified: bool },
 }
 
 pub struct ConstraintGroup {
     pub id: GroupId,
     pub relation: Relation,
-    pub members: Vec<ContractId>,
+    pub members: Vec<ContractId>,            // derived from relation at construction
+    pub resolves_at_ms: u64,
 }
 ```
+
+`Monotone` was added in phase 4 so an N-rung ladder is one group evaluated on a single
+dirty mark rather than N-1 overlapping `Implies` pairs; `Implies` is its two-rung case and
+dispatches to the same check. `Relation::resolution_states` enumerates every resolution a
+relation permits, and that enumeration — not a hardcoded payoff — is what the solver
+prices every signal against. It is also the state space the general fallback would use.
 
 `verified` defaults to false. An unverified binding never produces a cross-venue signal. Promotion to verified requires a human confirming that both contracts settle on the same source, at the same time, with the same tie-handling. This is discussed further in section 7.
 
@@ -242,11 +250,11 @@ Its central responsibility is sequence continuity at the venue subscription scop
 
 Snapshots are absolute and always applied. There is no attempt to repair or interpolate. The cost of a wrong book is a false signal that would lose money, and the cost of a brief blind spot is one missed opportunity out of thousands. Sequence tracking is currently for the single orderbook subscription the feed opens; multiple concurrent `sid`s are not yet modeled.
 
-After applying an update, a future registry will mark every constraint group containing that contract as dirty and hand the dirty set to the solver. Dirty marking is not yet implemented.
+After applying an update, every constraint group containing that contract is marked dirty and the dirty set is handed to the solver. Phase 4 implements the registry side of that (the reverse index and `Solver::evaluate`); the book store does not yet emit a dirty set of its own, so the engine loop that connects the two arrives with registry loading in phase 5.
 
 ### 4.3 Registry
 
-The registry is a load-time structure built from `config/registry.toml` plus discovery calls to each venue's market listing endpoint.
+The registry is a load-time structure built from `config/registry.toml` plus discovery calls to each venue's market listing endpoint. `src/registry.rs` implements the in-memory structure, the relation semantics, and the reverse index, and validates group shape at construction. Loading the file is phase 5.
 
 ```toml
 [[event]]
@@ -281,7 +289,7 @@ At load time the registry builds a reverse index from contract to the groups con
 
 ### 4.4 Solver
 
-The solver receives a dirty set and evaluates each group.
+The solver receives a dirty set and evaluates each group. Implemented in `src/solver/` (phase 4), reading books and engine time through a `BookSource` trait that `BookStore` satisfies.
 
 #### Fast paths
 
@@ -291,7 +299,7 @@ Four constraint shapes cover the overwhelming majority of real groups, and each 
 
 **Exhaustive set.** Sum the best asks across all members. If the total plus fees is under 100 cents, buying one of each guarantees a dollar.
 
-**Monotonicity.** For a ladder ordered by threshold, prices must be non-increasing. Any adjacent inversion is a violation, capturable by buying the cheaper stronger claim and selling the dearer weaker one.
+**Monotonicity.** For a ladder ordered by threshold, prices must be non-increasing. Any adjacent inversion is a violation, capturable by buying the cheaper *weaker* claim and selling the dearer stronger one. (An earlier draft of this line had the two the wrong way round; a violation means the lower threshold is the cheap side, and the reversed position pays nothing in one state. See docs/phase-4-summary.md §3.)
 
 **Cross venue equivalence.** For a verified pair, if buying yes on one venue and no on the other costs under 100 cents combined, the position is riskless.
 
@@ -312,7 +320,9 @@ A violation is a candidate, not a signal. Costing turns one into the other.
 3. **Fee application.** Apply the venue fee model per level consumed. Rounding up per level slightly over-counts relative to venues that round once per order. Over-counting is deliberately the safe direction.
 4. **Freshness gate.** Every participating book must be `Live` and updated within `max_book_age_ms`.
 5. **Net edge.** Guaranteed payoff minus total cost minus total fees. If this is not strictly positive, discard.
-6. **Ranking.** Compute annualized return as net divided by capital, scaled by 365 over days to resolution.
+6. **Ranking.** Compute annualized return as net divided by capital, scaled by 365 over days to resolution. The horizon is floored at one hour so a near-resolution trade cannot divide a real edge by nearly zero and dominate the ranking with a return that cannot be realized.
+
+Within the thinnest-leg cap the executable quantity is the one maximizing net profit, not the cap itself: deeper levels cost more while the guaranteed payoff per contract is fixed, so costing only the full cap would discard arbitrages whose edge exists only near the top of book. Net profit is monotone inside a level, so evaluating level boundaries is exact. Where every level is profitable the answer is the cap.
 
 ### 4.5 Fee models
 

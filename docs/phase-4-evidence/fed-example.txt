@@ -1,0 +1,22 @@
+$ cargo test --test solver -- --exact fed_example_rejection_table --nocapture
+
+------------------------------------------------------------------------
+Fed example, exhaustive set of four outcomes, 100 contracts per leg
+------------------------------------------------------------------------
+case            leg price     leg cost      leg fee      running
+98c (reject)            4          400           27          427
+98c (reject)           62         6200          165         6792
+98c (reject)           29         2900          145         9837
+98c (reject)            3          300           21        10158
+ INFO sum100::solver: candidate rejected group=0 reason=fees_exceed_gap legs=4 top_of_book_cost_cents=98 gross_edge_cents=2
+98c (reject)   payoff 10000  cost 9800  fees 358  net -158  -> rejected
+------------------------------------------------------------------------
+95c (accept)            3          300           21          321
+95c (accept)           60         6000          168         6489
+95c (accept)           29         2900          145         9534
+95c (accept)            3          300           21         9855
+ INFO sum100::solver: opportunity accepted group=0 legs=4 qty=100 top_of_book_cost_cents=95 total_cost_cents=9500 fees_cents=355 net_cents=145 annualized_return_percent=17.901234567901234
+95c (accept)   payoff 10000  cost 9500  fees 355  net 145  -> accepted, 17.90% annualized
+------------------------------------------------------------------------
+test fed_example_rejection_table ... ok
+

@@ -139,12 +139,33 @@ impl Book {
         })
     }
 
+    /// No asks derived from yes bids: price = 100 - yes_price, ascending.
+    ///
+    /// Buying the no outcome means taking a resting yes bid, because on Kalshi a
+    /// yes buy at P and a no buy at `100 - P` are the same match. The complement
+    /// fast path needs this ladder for its second leg, and it is deliberately the
+    /// mirror of [`Book::asks`] rather than a separate notion of liquidity.
+    pub fn no_asks(&self) -> impl Iterator<Item = Level> + '_ {
+        (0..=100usize).rev().filter_map(|i| {
+            let size = self.yes[i];
+            (size > 0).then_some(Level {
+                price: 100 - i as Cents,
+                size,
+            })
+        })
+    }
+
     pub fn best_bid(&self) -> Option<Level> {
         self.bids().next()
     }
 
     pub fn best_ask(&self) -> Option<Level> {
         self.asks().next()
+    }
+
+    /// Cheapest price at which the no outcome can be bought.
+    pub fn best_no_ask(&self) -> Option<Level> {
+        self.no_asks().next()
     }
 
     /// Best resting no bid (highest no price), if any.

@@ -3,10 +3,11 @@
 Planning horizon: 14 weeks from start, 16 if the coherence engine is built.
 The estimation path is specified in [docs/COHERENCE.md](docs/COHERENCE.md).
 
-## Current checkpoint — September 13, 2026
+## Current checkpoint — September 19, 2026
 
 The imported plan is a roadmap, not a claim that its future components exist.
-Phase 1 stage 2 and **phase 2 (book store)** are implemented. Later session
+Phase 1 stage 2, **phase 2 (book store)**, phase 3 (replay), and **phase 4
+(solver fast paths and costing)** are implemented. Later session
 decisions supersede the original `new_size`, bid/ask normalization,
 unauthenticated public WebSocket, and parsed-event recorder assumptions.
 
@@ -35,10 +36,19 @@ unauthenticated public WebSocket, and parsed-event recorder assumptions.
   false-gap reconnect loop) and `venue_ts_ms` on `FeedEvent`; evidence in
   docs/phase-2-1-summary.md. Retroactive phase 2 summary in docs/phase-2-summary.md;
   its thirty-minute UI gate remains open.
+- Phase 4: in-memory registry with the contract-to-group reverse index, the four
+  fast paths (complement, exhaustive, monotonicity, cross-venue), the costing
+  pipeline (freshness gate, depth walk, thinnest-leg cap, per-level fees, net
+  edge, annualized return), rejection-reason metrics, and four property tests.
+  Evidence in docs/phase-4-summary.md, including four documented departures from
+  the written spec. The general LP fallback stays future work. The phase's own
+  live deliverable — a replayed trading day's candidate log with a rejection
+  breakdown and five hand-checked rejections — needs phase 5 and remains open.
 - Coherence engine: design accepted in [docs/COHERENCE.md](docs/COHERENCE.md);
   implementation is phases 9 and 10, not started.
-- Pending: hour-long endurance session; thirty-minute UI side-by-side; registry/config;
-  extended solver properties; execution; second venue; coherence engine; UI.
+- Pending: hour-long endurance session; thirty-minute UI side-by-side; registry
+  loading and config parsing; solver CLI path and the live candidate log;
+  tick-to-signal latency; execution; second venue; coherence engine; UI.
 
 Use [README.md](README.md) for working commands and setup. The supplied original
 README is preserved verbatim as [README.reference.md](README.reference.md);

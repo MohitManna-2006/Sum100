@@ -1,6 +1,6 @@
 # Sum100
 
-Real-time coherence and arbitrage engine for prediction markets, in Rust. Paper trading only. Phase 2 provides the book store: live yes/no books with `100 - P` complement conversion, subscription-scoped sequence gap detection, forced-reconnect resync, and a `dump` command for visual verification. Phase 3 adds deterministic offline replay: `replay` drives a recorded file through the same parser and book store under an injected clock and verifies final book and gap-log hashes against the live run. Solver integration remains a later phase.
+Real-time coherence and arbitrage engine for prediction markets, in Rust. Paper trading only. Phase 2 provides the book store: live yes/no books with `100 - P` complement conversion, subscription-scoped sequence gap detection, forced-reconnect resync, and a `dump` command for visual verification. Phase 3 adds deterministic offline replay: `replay` drives a recorded file through the same parser and book store under an injected clock and verifies final book and gap-log hashes against the live run. Phase 4 adds the solver: four closed-form constraint checks, a depth-aware and fee-aware costing pipeline, and ranking by annualized return on locked capital. Registry loading, the paper executor, and a second venue remain later phases.
 
 ## Design documents and scope
 
@@ -11,7 +11,7 @@ implemented yet. The original
 supplied README is preserved verbatim in [README.reference.md](README.reference.md).
 It uses the earlier name Parity and describes planned commands; this README is
 the source for current setup and supported behavior. The broader roadmap does
-not mean the registry, solver integration, or frontend already exists.
+not mean registry loading, the executor, or the frontend already exists.
 
 ## Setup
 
@@ -71,7 +71,49 @@ Unknown types increment `unknown_messages` and `parse_attempts`, log at debug, a
 
 `BookStore` owns in-memory books. Each book keeps dense `[i64; 101]` size arrays for resting yes bids and no bids. Yes asks are derived as `price = 100 - no_price`. Snapshots are absolute and always applied; they set the book `Live` and rebase the subscription expected sequence. Deltas apply only when the book is `Live` and `seq` equals the expected subscription sequence. A gap marks every live book `Resyncing`, leaves level contents unchanged, and returns `Applied::Gap`. The driver (for example `dump`) calls `KalshiFeed::request_resync()`, which drops the socket so the existing reconnect path delivers a fresh snapshot. Sequence tracking is subscription-scoped for the single orderbook subscription the feed opens today; multiple concurrent `sid`s are not modeled yet.
 
-A crossed book (`best yes bid + best no bid > 100`) stays `Live` and increments `crossed_books_observed` — that condition is the complement arbitrage the later solver fast path will consume. Book metrics also cover snapshots applied, deltas applied, deltas skipped while not live, sequence gaps, resync requests, and negative-level clamps. `dump` prints a monospace best-bid/ask table to stdout on an interval (tracing stays on stderr) and records raw envelopes like `record`.
+A crossed book (`best yes bid + best no bid > 100`) stays `Live` and increments `crossed_books_observed` — that condition is the complement arbitrage the solver's fast path consumes. Book metrics also cover snapshots applied, deltas applied, deltas skipped while not live, sequence gaps, resync requests, and negative-level clamps. `dump` prints a monospace best-bid/ask table to stdout on an interval (tracing stays on stderr) and records raw envelopes like `record`.
+
+## Registry
+
+`Registry` (`src/registry.rs`) holds the constraint groups and the reverse index from contract to group ids that makes dirty marking a hash lookup rather than a scan. A `Relation` is `Complement`, `Exhaustive`, `Monotone` (a threshold ladder, ordered weakest claim first), `Implies` (the two-rung case of the same thing), or `Equivalent` (a cross-venue pair, gated on a `verified` flag a human sets). `Relation::resolution_states` enumerates every resolution a relation permits, and that enumeration — not a hardcoded "a set pays one dollar" — is what every signal is priced against. Group members are derived from the relation at construction so the two cannot drift apart, and malformed groups (too few members, a contract listed twice) are rejected there rather than at query time. Loading `config/registry.toml` and reconciling it against venue metadata is phase 5; nothing in this module reads a file.
+
+## Solver
+
+`Solver::evaluate(registry, books, dirty, fees, config)` (`src/solver/`) takes the dirty contracts, collects the groups containing them in group-id order, and returns opportunities ranked by annualized return. It reads books through the `BookSource` trait, implemented by `BookStore`, and takes engine time from the same injected clock that stamps `updated_at_ms`, so the freshness gate decides identically live and under replay. Data flows one way: books in, opportunities out, no calls backwards.
+
+**Four fast paths** (`fast.rs`) run on every dirty group and allocate nothing unless they find something. Each is stated in executable prices — what you can actually pay against what you can actually receive — because a quoted inversion that does not survive crossing both spreads is not a trade.
+
+| Path | Condition | Trade |
+| --- | --- | --- |
+| Complement | `ask_yes + ask_no < 100` on one contract | buy both outcomes |
+| Exhaustive | sum of member `ask_yes` `< 100` | buy one of each |
+| Monotonicity | `ask_yes[i] + ask_no[i+1] < 100` for an adjacent rung pair | buy the weaker rung's yes, buy the stronger rung's no |
+| Cross-venue | `ask_yes(A) + ask_no(B) < 100`, either direction | buy yes on one venue, no on the other |
+
+For a single Kalshi contract the two published forms of the complement check are the same inequality: a yes ask is a resting no bid at `100 - P`, so `ask_yes + ask_no = 200 - (bid_yes + bid_no)`. Only the ask form is checked, because that is the form that gets costed. Every violating adjacent pair in a ladder becomes its own candidate, and a cross-venue pair crossed in both directions yields two independent trades that consume different sides of both books.
+
+**Costing** (`costing.rs`) turns a candidate into a signal, in this order: freshness gate (every member book `Live` and inside `max_book_age_ms`, or the group is skipped whole), depth walk per leg, size cap at the thinnest leg, per-level fee application, net edge, annualized return. Fees round up once per level consumed rather than once on a blended average, because that is what the venue charges and, where it differs, it overstates — overstating can only suppress a marginal signal, while understating puts on a losing trade that looked profitable. Payoff is never assumed: `min_payoff_per_unit` enumerates the relation's resolution states and takes the worst, so a fast path that produced legs which do not pay in every state emits nothing and increments `rejected_payoff_not_guaranteed`.
+
+Within the thinnest-leg cap, the executable quantity is the one that maximizes net profit rather than always the cap itself. Deeper levels cost more while the guaranteed payoff per contract is fixed, so costing the full cap and rejecting on a negative total would discard genuine arbitrages whose edge exists only near the top of book — which is most of them. Because price per contract is constant inside a level and the per-level fee ceiling only amortizes as quantity grows, net profit rises monotonically within a level and can only turn over where some leg steps to a worse price; evaluating the level boundaries is therefore exact rather than a heuristic. When every level is profitable the answer is the cap, which is the published behavior.
+
+**Rejection breakdown.** `SolverMetrics` counts `not_live`, `stale`, `missing_book`, `unverified`, `no_depth`, `fees_exceed_gap`, `below_min_edge`, `below_min_return`, and `payoff_not_guaranteed`, and every candidate outcome is logged at info with its group, leg count, top-of-book cost, and reason. The expected result on live data is that fees reject the majority, which is only a defensible claim if each rejection is attributed to one concrete cause.
+
+**Configuration** is the `[engine]` block of `config/example.toml`, in memory as `SolverConfig`: `max_book_age_ms` 500, `min_net_edge_cents` 1, `min_annualized_return` 0.15, `max_position_size` 500. Parsing the file into it is phase 5.
+
+The Fed example, priced by the real solver:
+
+```
+case            leg price     leg cost      leg fee      running
+98c (reject)            4          400           27          427
+98c (reject)           62         6200          165         6792
+98c (reject)           29         2900          145         9837
+98c (reject)            3          300           21        10158
+ INFO sum100::solver: candidate rejected group=0 reason=fees_exceed_gap legs=4 top_of_book_cost_cents=98 gross_edge_cents=2
+98c (reject)   payoff 10000  cost 9800  fees 358  net -158  -> rejected
+95c (accept)   payoff 10000  cost 9500  fees 355  net 145  -> accepted, 17.90% annualized
+```
+
+Reproduce with `cargo test --test solver -- --exact fed_example_rejection_table --nocapture`; the captured run is in [docs/phase-4-evidence/](docs/phase-4-evidence/). Not implemented: the general linear-programming fallback for groups no fast path expresses, documented as future work in `src/solver/mod.rs`. Phase 4 details and the places where the implementation departs from its written spec are in [docs/phase-4-summary.md](docs/phase-4-summary.md).
 
 ## Recording format
 
@@ -102,6 +144,8 @@ gzip -dc data/production/kalshi-2026-09-13.ndjson.gz | head
 ## Fixtures and verification
 
 `tests/fixtures/` contains verbatim original stage 1 captures, including the complete previously truncated snapshot, and a fresh stage 2 live orderbook session. See its README for provenance and hashes. Parser tests read files from disk. Book-store tests replay the full stage 2 session to a pinned final best bid/ask, and cover complement conversion, gap/resync transitions, level lifecycle, floor-drift clamping, and crossed books. Recorder tests assert byte-identical raw read-back (after the single-LF rule), no blank lines, gzip member concatenation, sequence continuation on restart, and daily rotation. Signing tests generate a throwaway key and verify RSA-PSS signatures against its public key; random salt is not pinned.
+
+Solver tests (`tests/solver.rs`) cover all four fast paths on synthetic books, the Fed example in both directions, multi-level depth walking with size capping, the freshness gate, ranking, and the real stage 2 capture (whose final book is coherent and correctly produces nothing). Four property tests use a seeded splitmix64 generator so a failure replays exactly: coherent groups never signal, every emitted position pays at least its guaranteed payoff in every resolution the relation permits and strictly more than it cost to enter, fees never fall with quantity and splitting an order never beats batching it, and the thinnest leg caps the executable quantity.
 
 Live visual check: run `dump` beside the Kalshi web interface for an open ticker and confirm best prices match; any divergence should be preceded by a logged sequence gap and resync.
 

@@ -1,4 +1,4 @@
-use crate::types::Cents;
+use crate::types::{Cents, Venue};
 
 pub trait FeeModel {
     fn taker_fee(&self, price: Cents, qty: i64) -> Cents;
@@ -26,8 +26,36 @@ impl FeeModel for KalshiFees {
     }
 }
 
+/// Placeholder Polymarket schedule.
+///
+/// Polymarket charges no taker fee on most CLOB markets today, so the default is
+/// zero and a cross-venue trade is priced on the Kalshi leg alone. Phase 7 owns
+/// the real model. Zero is the honest placeholder rather than a guess: inventing
+/// a fee would suppress real signals, and inventing a wrong non-zero one would
+/// be indistinguishable from a modelling bug once the real schedule lands.
+#[derive(Default)]
 pub struct PolymarketFees {
     pub base_fee_bps: i64,
+}
+
+/// The fee schedule for every venue the engine can trade, selected by [`Venue`].
+///
+/// A multi-venue position is only correctly costed if each leg is charged by its
+/// own venue, so the solver never takes a single fee model; it takes this and
+/// looks the leg's venue up.
+#[derive(Default)]
+pub struct FeeModels {
+    pub kalshi: KalshiFees,
+    pub polymarket: PolymarketFees,
+}
+
+impl FeeModels {
+    pub fn for_venue(&self, venue: Venue) -> &dyn FeeModel {
+        match venue {
+            Venue::Kalshi => &self.kalshi,
+            Venue::Polymarket => &self.polymarket,
+        }
+    }
 }
 
 impl FeeModel for PolymarketFees {

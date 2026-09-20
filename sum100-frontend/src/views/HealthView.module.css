@@ -1,0 +1,252 @@
+.view {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
+.topline {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.title {
+  margin: 0 0 4px;
+  color: var(--color-neutral-4);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--color-neutral-3);
+  font-size: var(--font-size-sm);
+}
+
+.uptime {
+  color: var(--color-neutral-3);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-md);
+}
+
+.panel {
+  min-width: 0;
+  border: var(--border);
+}
+
+.widePanel {
+  grid-column: 1 / -1;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: 13px var(--spacing-md);
+  border-bottom: var(--border);
+}
+
+.panelTitle {
+  margin: 0;
+  color: var(--color-neutral-4);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.panelNote,
+.panelValue {
+  color: var(--color-neutral-3);
+  font-size: var(--font-size-xs);
+}
+
+.panelValue {
+  color: var(--color-accent-info);
+  font-family: var(--font-family-mono);
+}
+
+.latencyChart {
+  display: grid;
+  height: 220px;
+  grid-template-columns: repeat(10, 1fr);
+  align-items: end;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-lg) var(--spacing-md) var(--spacing-md);
+}
+
+.latencyItem {
+  display: grid;
+  height: 100%;
+  grid-template-rows: 1fr auto;
+  align-items: end;
+  gap: var(--spacing-sm);
+}
+
+.barTrack {
+  display: flex;
+  height: 100%;
+  align-items: end;
+  border-bottom: var(--border);
+}
+
+.bar {
+  position: relative;
+  width: 100%;
+  min-height: 2px;
+  background: var(--color-accent-info);
+  transition: background-color 100ms ease;
+}
+
+.bar:hover {
+  background: var(--color-neutral-4);
+}
+
+.barValue {
+  position: absolute;
+  top: -17px;
+  left: 50%;
+  color: var(--color-neutral-3);
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+  transform: translateX(-50%);
+}
+
+.tick {
+  color: #737373;
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+  text-align: center;
+}
+
+.gapChart {
+  width: 100%;
+  min-height: 220px;
+  padding: var(--spacing-sm);
+}
+
+.gapGuide {
+  stroke: var(--color-neutral-2);
+  stroke-width: 1;
+}
+
+.gapLine {
+  fill: none;
+  stroke: var(--color-accent-loss);
+  stroke-width: 2;
+}
+
+.gapPoint {
+  fill: var(--color-neutral-0);
+  stroke: var(--color-accent-loss);
+  stroke-width: 2;
+}
+
+.chartLabel {
+  fill: var(--color-neutral-3);
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+}
+
+.funnelBody {
+  padding: var(--spacing-lg) var(--spacing-md);
+}
+
+.funnel {
+  display: flex;
+  height: 28px;
+  overflow: hidden;
+  border: var(--border);
+  background: var(--color-neutral-1);
+}
+
+.segment {
+  min-width: 2px;
+  border-right: 1px solid var(--color-neutral-0);
+}
+
+.segment:last-child {
+  border-right: 0;
+}
+
+.gain {
+  background: var(--color-accent-gain);
+}
+
+.loss {
+  background: var(--color-accent-loss);
+}
+
+.info {
+  background: var(--color-accent-info);
+}
+
+.rejectionList {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-lg);
+}
+
+.rejectionItem {
+  min-width: 0;
+}
+
+.rejectionLabel {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-neutral-3);
+  font-size: 11px;
+}
+
+.legendDot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.rejectionValue {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-neutral-4);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 760px) {
+  .metricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .widePanel {
+    grid-column: auto;
+  }
+
+  .rejectionList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .latencyChart {
+    gap: 4px;
+  }
+
+  .barValue {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .topline {
+    align-items: start;
+    flex-direction: column;
+  }
+}

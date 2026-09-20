@@ -260,3 +260,18 @@ impl BookStore {
         self.expected_seq = None;
     }
 }
+
+/// The solver reads books and engine time through the store.
+///
+/// Time comes from the same injected clock that stamps `updated_at_ms`, so the
+/// freshness gate compares two readings of one clock. Reading wall time in the
+/// solver instead would make replay disagree with the live run it replays.
+impl crate::solver::BookSource for BookStore {
+    fn book(&self, contract: ContractId) -> Option<&Book> {
+        self.get(contract)
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.clock.now_ms()
+    }
+}
