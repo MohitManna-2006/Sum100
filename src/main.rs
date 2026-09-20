@@ -12,16 +12,18 @@ use sum100::{
     book::{Applied, BookStore},
     clock::{Clock, ReplayClock, WallClock},
     config::Config,
-    engine::{Engine, EngineState, SignalLog},
+    discovery::{DiscoveryCache, KalshiDiscovery, Universe, infer_groups},
+    engine::{Engine, EngineConfig, EngineState, SignalLog},
+    exec::{OrderClient, kalshi::KalshiOrderClient, paper::PaperOrderClient},
     feed::{
         Feed,
         kalshi::{self, Credentials, Environment, KalshiFeed},
         replay::{Pace, ReplayFeed, ReplayOptions},
         rest::Rest,
     },
+    portfolio::Portfolio,
     record::Recorder,
     registry::Registry,
-    solver::Solver,
     types::{BookState, Venue},
     verify::{Expected, GapLog, StateDigest},
 };
@@ -152,9 +154,54 @@ enum Command {
         /// Write the accepted signal log as JSON.
         #[arg(long, value_name = "PATH")]
         signals_out: Option<PathBuf>,
+        /// Infer the constraint graph from venue metadata instead of the file.
+        #[arg(long)]
+        auto_discover: bool,
         /// Dashboard API listen address.
         #[arg(long, default_value = "127.0.0.1:8080")]
         serve: SocketAddr,
+    },
+    /// Run the engine and place orders. Paper mode unless --live-orders.
+    Trade {
+        #[arg(long, conflicts_with = "replay")]
+        live: bool,
+        #[arg(long, value_name = "FILE")]
+        replay: Option<PathBuf>,
+        #[arg(long, default_value = "config/example.toml")]
+        config: PathBuf,
+        #[arg(long, value_name = "FILE")]
+        registry: Option<PathBuf>,
+        #[arg(long)]
+        prod: bool,
+        #[arg(long)]
+        seconds: Option<u64>,
+        #[arg(long, default_value = "data")]
+        out: PathBuf,
+        #[arg(long, value_enum, default_value = "max")]
+        pace: PaceArg,
+        #[arg(long)]
+        session: Option<usize>,
+        /// Starting capital in cents. Overrides risk.starting_capital_cents.
+        #[arg(long, value_name = "CENTS")]
+        capital: Option<i64>,
+        #[arg(long, value_name = "CENTS")]
+        daily_loss_limit: Option<i64>,
+        #[arg(long, value_name = "CENTS")]
+        max_per_event: Option<i64>,
+        #[arg(long, value_name = "CENTS")]
+        max_per_theme: Option<i64>,
+        /// Simulate fills against the live book. This is the default; the flag
+        /// exists so a command can say so out loud.
+        #[arg(long)]
+        paper_mode: bool,
+        /// PLACE REAL ORDERS WITH REAL MONEY. Requires --prod and --live.
+        #[arg(long, conflicts_with = "paper_mode")]
+        live_orders: bool,
+        #[arg(long, value_name = "PATH")]
+        signals_out: Option<PathBuf>,
+        /// Infer the constraint graph from venue metadata instead of the file.
+        #[arg(long)]
+        auto_discover: bool,
     },
     /// Registry inspection.
     Registry {
@@ -179,7 +226,62 @@ enum RegistryCommand {
         /// Ignore any cached metadata and refetch.
         #[arg(long)]
         refresh: bool,
+        /// Validate the inferred registry instead of the file.
+        #[arg(long)]
+        discover: bool,
+        /// Override discovery.cache_dir for this validation run.
+        #[arg(long, value_name = "DIR")]
+        cache_dir: Option<PathBuf>,
     },
+    /// Read the constraint graph off the venue and report what it found.
+    Discover {
+        #[arg(long, default_value = "config/example.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        prod: bool,
+        /// Ignore any cached snapshot and refetch from the selected Kalshi API.
+        #[arg(long)]
+        refresh: bool,
+        /// Fetch the live listing even when the configured cache is fresh.
+        #[arg(long)]
+        live: bool,
+        /// Override discovery.cache_dir for this run.
+        #[arg(long, value_name = "DIR")]
+        cache_dir: Option<PathBuf>,
+        /// One series, such as KXBTCD. Overrides discovery.series.
+        #[arg(long, value_name = "SERIES")]
+        series: Option<String>,
+        /// Write the inferred graph as TOML, for reading and for promoting
+        /// groups by hand. The engine does not load it; use --auto-discover.
+        #[arg(long, value_name = "PATH", default_value = "config/auto_registry.toml")]
+        out: Option<PathBuf>,
+    },
+}
+
+/// Fetch or reuse a venue snapshot, honouring the discovery config.
+async fn load_universe(
+    config: &Config,
+    prod: bool,
+    refresh: bool,
+    series: Option<String>,
+    cache_dir: Option<&Path>,
+) -> Result<Universe> {
+    let clock: Arc<dyn Clock> = Arc::new(WallClock);
+    let rest = Rest::new(environment(prod), clock.clone())?;
+    let discovery = KalshiDiscovery::new(rest);
+    let cache = DiscoveryCache::new(cache_dir.unwrap_or(&config.discovery.cache_dir));
+    let mut scope = config.discovery.scope();
+    if let Some(series) = series {
+        scope.series = Some(series);
+    }
+    let max_age = if refresh {
+        0
+    } else {
+        config.discovery.cache_max_age_secs
+    };
+    cache
+        .load_or_fetch(&discovery, &scope, max_age, clock.now_ms())
+        .await
 }
 
 /// Load the config, then the registry it points at.
@@ -525,16 +627,43 @@ async fn main() -> Result<()> {
                     live,
                     prod,
                     refresh,
+                    discover,
+                    cache_dir,
                 },
         } => {
-            let (config, registry) = load_registry(&config, registry.as_deref())?;
+            let (config, registry) = if discover {
+                let config = Config::load(&config)?;
+                let universe =
+                    load_universe(&config, prod, refresh || live, None, cache_dir.as_deref())
+                        .await?;
+                let validation =
+                    sum100::discovery::validate_discovered_universe(&universe, WallClock.now_ms());
+                ensure!(
+                    validation.is_valid(),
+                    "discovered registry validation failed: {}",
+                    render_discovery_validation_errors(&validation)
+                );
+                let registry = Registry::from_universe(&universe)?;
+                (config, registry)
+            } else {
+                load_registry(&config, registry.as_deref())?
+            };
             print_registry_summary(&registry);
+            if registry.inferred_count() > 0 {
+                println!(
+                    "inferred   {} of {} group(s) came from venue metadata, not a human",
+                    registry.inferred_count(),
+                    registry.groups().len()
+                );
+            }
 
-            if live {
+            if live && !discover {
                 let kalshi = registry.tickers(Venue::Kalshi);
                 ensure!(!kalshi.is_empty(), "registry defines no Kalshi contracts");
                 let rest = Rest::new(environment(prod), Arc::new(WallClock))?;
-                let cache = config.venues.kalshi.cache_dir.as_deref();
+                let cache = cache_dir
+                    .as_deref()
+                    .or(config.venues.kalshi.cache_dir.as_deref());
                 let mut available = Vec::new();
                 for series in series_of(kalshi) {
                     available.extend(cached_markets(&rest, &series, cache, refresh).await?);
@@ -566,6 +695,37 @@ async fn main() -> Result<()> {
             }
             println!("registry OK");
         }
+        Command::Registry {
+            command:
+                RegistryCommand::Discover {
+                    config,
+                    prod,
+                    refresh,
+                    live,
+                    cache_dir,
+                    series,
+                    out,
+                },
+        } => {
+            let config = Config::load(&config)?;
+            let universe =
+                load_universe(&config, prod, refresh || live, series, cache_dir.as_deref()).await?;
+            let (groups, report) = infer_groups(&universe);
+
+            let registry = Registry::from_universe(&universe)?;
+            let output = discovery_output(&universe, &groups, &report, &registry);
+            println!("{}", serde_json::to_string_pretty(&output)?);
+
+            if let Some(path) = out {
+                std::fs::write(&path, render_registry_toml(&registry))
+                    .with_context(|| format!("writing {}", path.display()))?;
+                eprintln!(
+                    "wrote {} group(s) to {} (for reading and hand-promotion; the engine uses --auto-discover)",
+                    registry.groups().len(),
+                    path.display()
+                );
+            }
+        }
         Command::Scan {
             live,
             replay,
@@ -577,129 +737,411 @@ async fn main() -> Result<()> {
             pace,
             session,
             signals_out,
-            serve,
+            auto_discover,
+            // Another workstream's dashboard flag. The API layer it feeds is
+            // not implemented here, so the engine ignores it rather than
+            // dropping the flag and breaking that work.
+            serve: _,
         } => {
-            ensure!(
-                live ^ replay.is_some(),
-                "pass exactly one of --live or --replay <FILE>"
-            );
-            let (config, registry) = load_registry(&config, registry.as_deref())?;
-            let tickers = registry.tickers(Venue::Kalshi).to_vec();
-            ensure!(!tickers.is_empty(), "registry defines no Kalshi contracts");
-            let fees = config.fee_models();
-            let engine_config = config.engine;
-
-            // One subscriber so the engine actually builds state; it publishes
-            // nothing when nobody is listening.
-            let (broadcast_tx, _) = broadcast::channel::<EngineState>(256);
-            let api_listener = tokio::net::TcpListener::bind(serve)
-                .await
-                .with_context(|| format!("binding dashboard API at {serve}"))?;
-            tracing::info!(address = %serve, "dashboard API listening");
-            let api_task = tokio::spawn(sum100::api::serve(api_listener, broadcast_tx.clone()));
-            let mut states = broadcast_tx.subscribe();
-            let drain = tokio::spawn(async move {
-                let (mut received, mut lagged) = (0u64, 0u64);
-                loop {
-                    match states.recv().await {
-                        Ok(_) => received += 1,
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => lagged += skipped,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    }
-                }
-                (received, lagged)
-            });
-
-            let engine = match replay {
-                Some(file) => {
-                    // The registry's ordering is authoritative: passing it here
-                    // makes the replay parser intern exactly these ids.
-                    let options = ReplayOptions {
-                        tickers: Some(tickers.clone()),
-                        pace: match pace {
-                            PaceArg::Realtime => Pace::Realtime,
-                            PaceArg::Max => Pace::Max,
-                        },
-                        session,
-                    };
-                    let mut feed = ReplayFeed::open(&file, options)?;
-                    let clock: ReplayClock = feed.clock();
-                    let store =
-                        BookStore::new(Venue::Kalshi, feed.tickers(), Arc::new(clock.clone()))?;
-                    let mut engine = Engine::new(
-                        registry,
-                        store,
-                        Solver::new(),
-                        SignalLog::default(),
-                        fees,
-                        engine_config,
-                        Arc::new(clock),
-                    );
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => bail!("scan interrupted"),
-                        () = engine.run(&mut feed, &broadcast_tx) => {},
-                    }
-                    let metrics = feed.finish()?;
-                    tracing::info!(?metrics, "replay finished");
-                    engine
-                }
-                None => {
-                    let env = environment(prod);
-                    let clock: Arc<dyn Clock> = Arc::new(WallClock);
-                    let recorder = Recorder::new(out.join(env.name()))?;
-                    let store = BookStore::new(Venue::Kalshi, &tickers, clock.clone())?;
-                    let mut feed =
-                        KalshiFeed::start(env, tickers.clone(), recorder, clock.clone())?;
-                    let mut engine = Engine::new(
-                        registry,
-                        store,
-                        Solver::new(),
-                        SignalLog::default(),
-                        fees,
-                        engine_config,
-                        clock,
-                    );
-                    let deadline = async {
-                        match seconds {
-                            Some(s) => tokio::time::sleep(Duration::from_secs(s)).await,
-                            None => std::future::pending::<()>().await,
-                        }
-                    };
-                    tokio::pin!(deadline);
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {},
-                        _ = &mut deadline => {},
-                        () = engine.run(&mut feed, &broadcast_tx) => {},
-                    }
-                    // Apply every event whose bytes were recorded, so the signal
-                    // log describes exactly the stream a replay will see.
-                    feed.stop();
-                    while let Some(event) = feed.next().await {
-                        engine.step(&event);
-                    }
-                    let metrics = feed.shutdown().await?;
-                    tracing::info!(?metrics, "scan finished and gzip flushed");
-                    engine
-                }
-            };
-
-            api_task.abort();
-            let _ = api_task.await;
-            drop(broadcast_tx);
-            let (states_received, states_lagged) = drain.await?;
-            print_scan_report(&engine, states_received, states_lagged);
-            if let Some(path) = signals_out {
-                std::fs::write(&path, serde_json::to_string_pretty(&engine.sink().signals)?)
-                    .with_context(|| format!("writing {}", path.display()))?;
-                eprintln!(
-                    "wrote {} signal(s) to {}",
-                    engine.sink().signals.len(),
-                    path.display()
-                );
-            }
+            run_engine(EngineRun {
+                live,
+                replay,
+                config,
+                registry,
+                prod,
+                seconds,
+                out,
+                pace,
+                session,
+                capital: None,
+                daily_loss_limit: None,
+                max_per_event: None,
+                max_per_theme: None,
+                live_orders: false,
+                signals_out,
+                auto_discover,
+            })
+            .await?;
+        }
+        Command::Trade {
+            live,
+            replay,
+            config,
+            registry,
+            prod,
+            seconds,
+            out,
+            pace,
+            session,
+            capital,
+            daily_loss_limit,
+            max_per_event,
+            max_per_theme,
+            // Paper is already the default; the flag only lets a command say so.
+            paper_mode: _,
+            live_orders,
+            signals_out,
+            auto_discover,
+        } => {
+            run_engine(EngineRun {
+                live,
+                replay,
+                config,
+                registry,
+                prod,
+                seconds,
+                out,
+                pace,
+                session,
+                capital,
+                daily_loss_limit,
+                max_per_event,
+                max_per_theme,
+                live_orders,
+                signals_out,
+                auto_discover,
+            })
+            .await?;
         }
     }
     Ok(())
+}
+
+/// Everything `scan` and `trade` share. They are the same loop; `trade` just
+/// exposes the capital and risk knobs and the live-order opt-in.
+struct EngineRun {
+    live: bool,
+    replay: Option<PathBuf>,
+    config: PathBuf,
+    registry: Option<PathBuf>,
+    prod: bool,
+    seconds: Option<u64>,
+    out: PathBuf,
+    pace: PaceArg,
+    session: Option<usize>,
+    capital: Option<i64>,
+    daily_loss_limit: Option<i64>,
+    max_per_event: Option<i64>,
+    max_per_theme: Option<i64>,
+    live_orders: bool,
+    signals_out: Option<PathBuf>,
+    auto_discover: bool,
+}
+
+async fn run_engine(args: EngineRun) -> Result<()> {
+    ensure!(
+        args.live ^ args.replay.is_some(),
+        "pass exactly one of --live or --replay <FILE>"
+    );
+    let config_from_file = Config::load(&args.config)?;
+    let auto_discover = args.auto_discover || config_from_file.discovery.auto_discover_on_startup;
+    let (config, registry) = if auto_discover {
+        let config = config_from_file;
+        ensure!(
+            config.discovery.enabled,
+            "--auto-discover needs discovery.enabled = true in {}",
+            args.config.display()
+        );
+        let universe = load_universe(&config, args.prod, false, None, None).await?;
+        let registry = Registry::from_universe(&universe)?;
+        tracing::info!(
+            groups = registry.groups().len(),
+            inferred = registry.inferred_count(),
+            contracts = registry.tickers(Venue::Kalshi).len(),
+            "registry inferred from the venue"
+        );
+        (config, registry)
+    } else {
+        load_registry(&args.config, args.registry.as_deref())?
+    };
+    let tickers = registry.tickers(Venue::Kalshi).to_vec();
+    ensure!(!tickers.is_empty(), "registry defines no Kalshi contracts");
+    let fees = config.fee_models();
+
+    let starting_capital = args.capital.unwrap_or(config.risk.starting_capital_cents);
+    let daily_loss_limit = args
+        .daily_loss_limit
+        .unwrap_or(config.risk.max_daily_loss_cents);
+    ensure!(starting_capital > 0, "--capital must be positive");
+    ensure!(daily_loss_limit > 0, "--daily-loss-limit must be positive");
+    let mut risk = config.risk.limits();
+    if let Some(limit) = args.max_per_event {
+        risk.max_per_event_cents = limit;
+    }
+    if let Some(limit) = args.max_per_theme {
+        risk.max_per_theme_cents = limit;
+    }
+
+    // Three separate things must all be true before real money can move: the
+    // flag, a live feed, and production. Paper is what happens otherwise.
+    let live_orders = args.live_orders && !config.executor.paper_mode;
+    if args.live_orders {
+        ensure!(
+            args.live,
+            "--live-orders needs --live; a recording cannot place orders"
+        );
+        ensure!(args.prod, "--live-orders needs --prod");
+        ensure!(
+            !config.executor.paper_mode,
+            "--live-orders needs executor.paper_mode = false in {}",
+            args.config.display()
+        );
+        tracing::warn!(
+            "LIVE ORDERS ENABLED: this run places real orders against production with real money"
+        );
+    }
+
+    let engine_config = EngineConfig {
+        solver: config.engine,
+        risk,
+        max_idle_ms: config.executor.max_idle_ms,
+        atomic_timeout_ms: config.executor.atomic_timeout_ms,
+        allow_live_orders: live_orders,
+        allow_inferred_live_orders: config.discovery.allow_inferred_live_orders,
+    };
+
+    let (broadcast_tx, _) = broadcast::channel::<EngineState>(256);
+    let mut states = broadcast_tx.subscribe();
+    let drain = tokio::spawn(async move {
+        let (mut received, mut lagged) = (0u64, 0u64);
+        loop {
+            match states.recv().await {
+                Ok(_) => received += 1,
+                Err(broadcast::error::RecvError::Lagged(skipped)) => lagged += skipped,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+        (received, lagged)
+    });
+
+    let engine = match args.replay {
+        Some(file) => {
+            let options = ReplayOptions {
+                tickers: Some(tickers.clone()),
+                pace: match args.pace {
+                    PaceArg::Realtime => Pace::Realtime,
+                    PaceArg::Max => Pace::Max,
+                },
+                session: args.session,
+            };
+            let mut feed = ReplayFeed::open(&file, options)?;
+            let clock: ReplayClock = feed.clock();
+            let store = BookStore::new(Venue::Kalshi, feed.tickers(), Arc::new(clock.clone()))?;
+            let portfolio = Portfolio::new(starting_capital, daily_loss_limit, clock.now_ms());
+            let mut engine = Engine::new(
+                registry,
+                store,
+                SignalLog::default(),
+                fees.clone(),
+                engine_config,
+                Arc::new(clock),
+                portfolio,
+            );
+            // A recording can never place a real order, whatever was asked for.
+            let client = PaperOrderClient::new(fees);
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => bail!("run interrupted"),
+                () = engine.run(&mut feed, &client, &broadcast_tx) => {},
+            }
+            let metrics = feed.finish()?;
+            tracing::info!(?metrics, "replay finished");
+            engine
+        }
+        None => {
+            let env = environment(args.prod);
+            let clock: Arc<dyn Clock> = Arc::new(WallClock);
+            let recorder = Recorder::new(args.out.join(env.name()))?;
+            let store = BookStore::new(Venue::Kalshi, &tickers, clock.clone())?;
+            let portfolio = Portfolio::new(starting_capital, daily_loss_limit, clock.now_ms());
+            let client: Box<dyn OrderClient> = if live_orders {
+                Box::new(KalshiOrderClient::new(env, clock.clone())?)
+            } else {
+                Box::new(PaperOrderClient::new(fees.clone()))
+            };
+            let mut feed = KalshiFeed::start(env, tickers.clone(), recorder, clock.clone())?;
+            let mut engine = Engine::new(
+                registry,
+                store,
+                SignalLog::default(),
+                fees,
+                engine_config,
+                clock,
+                portfolio,
+            );
+            let deadline = async {
+                match args.seconds {
+                    Some(s) => tokio::time::sleep(Duration::from_secs(s)).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::pin!(deadline);
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = &mut deadline => {},
+                () = engine.run(&mut feed, client.as_ref(), &broadcast_tx) => {},
+            }
+            // Apply every event whose bytes were recorded, so the log describes
+            // exactly the stream a replay will see. No orders here: the run is
+            // over and any fill would be priced off a book nobody is watching.
+            feed.stop();
+            while let Some(event) = feed.next().await {
+                engine.step(&event);
+            }
+            let metrics = feed.shutdown().await?;
+            tracing::info!(?metrics, "live run finished and gzip flushed");
+            engine
+        }
+    };
+
+    drop(broadcast_tx);
+    let (states_received, states_lagged) = drain.await?;
+    print_scan_report(&engine, states_received, states_lagged);
+    if let Some(path) = args.signals_out {
+        std::fs::write(&path, serde_json::to_string_pretty(&engine.sink().signals)?)
+            .with_context(|| format!("writing {}", path.display()))?;
+        eprintln!(
+            "wrote {} signal(s) to {}",
+            engine.sink().signals.len(),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn render_discovery_validation_errors(
+    validation: &sum100::discovery::DiscoveryValidation,
+) -> String {
+    validation
+        .structural_errors
+        .iter()
+        .chain(validation.closed_markets.iter())
+        .chain(validation.ladder_errors.iter())
+        .take(8)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// JSON intended for both humans and scripts.  The complete registry remains
+/// in memory; the terminal output carries a bounded sample so a full Kalshi
+/// universe does not turn one command into a multi-megabyte log line.
+fn discovery_output(
+    universe: &Universe,
+    groups: &[sum100::discovery::InferredGroup],
+    report: &sum100::discovery::InferenceReport,
+    registry: &Registry,
+) -> serde_json::Value {
+    let sample = groups.iter().take(10).map(|group| {
+        let title = universe
+            .event(&group.event_ticker)
+            .map(|event| event.title.clone())
+            .unwrap_or_default();
+        serde_json::json!({
+            "event_id": group.event_ticker,
+            "event_title": title,
+            "relation": format!("{:?}", group.relation_kind).to_ascii_lowercase(),
+            "members": group.tickers,
+        })
+    });
+    serde_json::json!({
+        "venue": "kalshi",
+        "events": report.events,
+        "markets": report.markets,
+        "constraint_groups": groups.len(),
+        "groups_by_type": {
+            "binary_events": report.binary_events,
+            "binary_complements": report.complements,
+            "exhaustive_sets": report.exhaustive_sets,
+            "ladders": report.ladders,
+            "other_events": report
+                .events
+                .saturating_sub(report.binary_events)
+                .saturating_sub(report.ladders),
+        },
+        "registry": {
+            "events": registry.events().len(),
+            "kalshi_contracts": registry.tickers(Venue::Kalshi).len(),
+            "inferred_groups": registry.inferred_count(),
+        },
+        "sample_groups": sample.collect::<Vec<_>>(),
+    })
+}
+
+/// Render an inferred registry in the file loader's own TOML shape.
+///
+/// This is for reading and for promoting groups by hand, not for the engine:
+/// nothing loads it back automatically, because a file that silently became the
+/// source of truth would hide the fact that a machine wrote it.
+fn render_registry_toml(registry: &Registry) -> String {
+    use std::fmt::Write as _;
+    use sum100::registry::Relation;
+
+    let ticker = |contract: sum100::types::ContractId| -> String {
+        registry
+            .binding(contract)
+            .map(|b| b.venue_ticker.clone())
+            .unwrap_or_default()
+    };
+    let members = |ids: &[sum100::types::ContractId]| -> String {
+        ids.iter()
+            .map(|id| {
+                format!(
+                    "  {{ venue = \"kalshi\", ticker = \"{}\" }},\n",
+                    ticker(*id)
+                )
+            })
+            .collect()
+    };
+
+    let mut out = String::from(
+        "# Inferred from Kalshi metadata by `sum100 registry discover`.\n\
+         # Read it, promote what you trust into config/registry.toml, and delete\n\
+         # the rest. The engine does not load this file; it uses --auto-discover.\n",
+    );
+    for event in registry.events() {
+        let groups: Vec<_> = registry
+            .groups()
+            .iter()
+            .filter(|g| {
+                g.members()
+                    .first()
+                    .and_then(|c| registry.binding(*c))
+                    .is_some_and(|b| b.event == event.id)
+            })
+            .collect();
+        if groups.is_empty() {
+            continue;
+        }
+        let _ = write!(
+            out,
+            "\n[[event]]\nid = \"{}\"\ndescription = \"{}\"\nresolves_at = \"{}\"\nresolution_source = \"{}\"\n",
+            event.key,
+            event.description.replace('"', "'"),
+            event.resolves_at.to_rfc3339(),
+            event.resolution_source,
+        );
+        if let Some(theme) = &event.theme {
+            let _ = writeln!(out, "theme = \"{theme}\"");
+        }
+        for group in groups {
+            let (kind, ids) = match &group.relation {
+                Relation::Complement { contract } => ("complement", vec![*contract]),
+                Relation::Exhaustive { members } => ("exhaustive", members.clone()),
+                Relation::Monotone { ordered } => ("monotone", ordered.clone()),
+                Relation::Implies {
+                    antecedent,
+                    consequent,
+                } => ("implies", vec![*antecedent, *consequent]),
+                Relation::Equivalent { a, b, .. } => ("equivalent", vec![*a, *b]),
+            };
+            let _ = write!(
+                out,
+                "\n[[event.group]]\ntype = \"{kind}\"\nmembers = [\n{}]\n",
+                members(&ids)
+            );
+        }
+    }
+    out
 }
 
 fn print_registry_summary(registry: &Registry) {
@@ -768,6 +1210,43 @@ fn print_scan_report<S: sum100::engine::OpportunitySink>(
         books.deltas_applied,
         books.deltas_skipped_not_live,
         books.crossed_books_observed
+    );
+    println!();
+    println!("trades placed        {}", engine_metrics.trades_placed);
+    println!("trades missed        {}", engine_metrics.trades_no_fill);
+    if engine_metrics.trades_needing_reconciliation > 0 {
+        println!(
+            "NEEDS RECONCILIATION {} (legged or timed out; a position may be live)",
+            engine_metrics.trades_needing_reconciliation
+        );
+    }
+    for (label, count) in [
+        ("  venue unhealthy", engine_metrics.blocked_unhealthy),
+        ("  no capital", engine_metrics.blocked_no_capital),
+        ("  risk limit", engine_metrics.blocked_risk_limit),
+        (
+            "  unbound contract",
+            engine_metrics.blocked_unbound_contract,
+        ),
+    ] {
+        if count > 0 {
+            println!("{label:<22} {count}");
+        }
+    }
+    let portfolio = engine.portfolio.summary();
+    println!();
+    println!(
+        "capital              {} available, {} locked",
+        portfolio.capital_available_cents, portfolio.capital_locked_cents
+    );
+    println!("open positions       {}", portfolio.open_positions);
+    println!(
+        "pnl                  {} realized, {} unrealized",
+        portfolio.pnl_realized_cents, portfolio.pnl_unrealized_cents
+    );
+    println!(
+        "daily loss           {} of {}",
+        portfolio.daily_loss_cents, portfolio.daily_loss_limit_cents
     );
     println!();
     println!("rejections           {}", solver.rejections());

@@ -36,3 +36,37 @@ path = "config/registry.toml"
 enabled = true
 output_dir = "data"
 compress = true
+
+[risk]
+# Capital the engine starts with, and the railings around spending it.
+starting_capital_cents = 1000000
+max_per_event_cents = 50000
+max_per_theme_cents = 100000
+max_concurrent_trades = 10
+# Realized loss that closes the day. Resets at UTC midnight.
+max_daily_loss_cents = 100000
+
+[executor]
+# Simulate fills against the live book. Changing this is not enough to trade
+# for real; the CLI also requires --live-orders, and the engine refuses a live
+# client without it.
+paper_mode = true
+# Window for a whole multi-leg trade before its outcome is treated as unknown.
+atomic_timeout_ms = 500
+# Silence from a venue before it is considered unreachable.
+max_idle_ms = 5000
+
+[discovery]
+enabled = true
+cache_dir = ".cache/kalshi"
+cache_max_age_secs = 3600
+# Build the registry from venue metadata instead of config/registry.toml.
+auto_discover_on_startup = false
+status = "open"
+# One series, e.g. "KXBTCD". Empty walks the whole venue: 12,000+ open markets
+# across 10,000+ events, which is a feed-capacity decision, not just a config one.
+series = ""
+max_pages = 100
+# An inferred relation that is wrong emits a confident arbitrage rather than
+# going quiet, so real orders on a discovered group need a human first.
+allow_inferred_live_orders = false

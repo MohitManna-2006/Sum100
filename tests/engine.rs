@@ -4,17 +4,19 @@
 use std::{path::Path, sync::Arc};
 use sum100::{
     book::BookStore,
-    clock::ReplayClock,
+    clock::{Clock, ReplayClock},
     config::Config,
-    engine::{Engine, EngineState, SignalLog},
+    engine::{Engine, EngineConfig, EngineState, SignalLog},
+    exec::paper::PaperOrderClient,
     feed::{
         Feed, FeedEvent,
         kalshi::Parser,
         replay::{Pace, ReplayFeed, ReplayOptions},
     },
     fees::FeeModels,
+    portfolio::Portfolio,
     registry::{GroupId, Registry},
-    solver::{Solver, SolverConfig},
+    solver::SolverConfig,
     types::{Cents, ContractId, Level, Side, Venue},
 };
 use tokio::sync::broadcast;
@@ -84,18 +86,30 @@ impl Feed for VecFeed {
     }
 }
 
+/// Capital far beyond any fixture trade, so tests exercise the loop rather
+/// than the funding limit. Tests that care about limits set their own.
+const DEEP_POCKETS: i64 = 100_000_000;
+
 fn engine_over(registry: Registry, clock: ReplayClock) -> Engine<SignalLog> {
     let tickers: Vec<String> = registry.tickers(Venue::Kalshi).to_vec();
     let store = BookStore::new(Venue::Kalshi, &tickers, Arc::new(clock.clone())).unwrap();
+    let portfolio = Portfolio::new(DEEP_POCKETS, DEEP_POCKETS, clock.now_ms());
     Engine::new(
         registry,
         store,
-        Solver::new(),
         SignalLog::default(),
         FeeModels::default(),
-        SolverConfig::default(),
+        EngineConfig {
+            solver: SolverConfig::default(),
+            ..EngineConfig::default()
+        },
         Arc::new(clock),
+        portfolio,
     )
+}
+
+fn paper() -> PaperOrderClient {
+    PaperOrderClient::new(FeeModels::default())
 }
 
 /// Snapshot making one contract quote `ask_yes` and `ask_no`.
@@ -215,7 +229,8 @@ async fn the_loop_solves_dirty_groups_and_hands_signals_to_the_sink() {
         quote(3, 55, 40, 200, 4),
     ]);
     let (tx, mut rx) = broadcast::channel::<EngineState>(64);
-    engine.run(&mut feed, &tx).await;
+    let client = paper();
+    engine.run(&mut feed, &client, &tx).await;
     drop(tx);
 
     // The last snapshot breaks two constraints at once: contract 3's own yes and
@@ -267,7 +282,8 @@ async fn each_dirty_group_is_evaluated_exactly_once_per_update() {
     let mut engine = engine_over(phase3a_registry(), clock);
     let mut feed = VecFeed::new((0..4).map(|i| quote(i, 50, 51, 10, i as u64 + 1)).collect());
     let (tx, _rx) = broadcast::channel::<EngineState>(64);
-    engine.run(&mut feed, &tx).await;
+    let client = paper();
+    engine.run(&mut feed, &client, &tx).await;
 
     // Four updates, each touching one complement group and the shared ladder:
     // two groups per update, never the ladder twice for one event.
@@ -297,7 +313,8 @@ async fn a_sequence_gap_asks_the_feed_to_resync_and_stops_solving() {
     ]);
     let resyncs = feed.resyncs.clone();
     let (tx, _rx) = broadcast::channel::<EngineState>(64);
-    engine.run(&mut feed, &tx).await;
+    let client = paper();
+    engine.run(&mut feed, &client, &tx).await;
 
     assert_eq!(engine.metrics.sequence_gaps, 1);
     assert_eq!(resyncs.load(std::sync::atomic::Ordering::Relaxed), 1);
@@ -323,17 +340,19 @@ async fn replay_once(session: usize) -> (Vec<sum100::engine::Signal>, Vec<Engine
     let mut feed = ReplayFeed::open(&phase3a_file(), options).unwrap();
     let clock = feed.clock();
     let store = BookStore::new(Venue::Kalshi, feed.tickers(), Arc::new(clock.clone())).unwrap();
+    let portfolio = Portfolio::new(DEEP_POCKETS, DEEP_POCKETS, clock.now_ms());
     let mut engine = Engine::new(
         registry,
         store,
-        Solver::new(),
         SignalLog::default(),
         FeeModels::default(),
-        SolverConfig::default(),
+        EngineConfig::default(),
         Arc::new(clock),
+        portfolio,
     );
     let (tx, mut rx) = broadcast::channel::<EngineState>(65_536);
-    engine.run(&mut feed, &tx).await;
+    let client = paper();
+    engine.run(&mut feed, &client, &tx).await;
     feed.finish().unwrap();
     drop(tx);
     let mut states = Vec::new();

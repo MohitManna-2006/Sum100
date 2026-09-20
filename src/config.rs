@@ -9,8 +9,11 @@
 //! read by [`crate::registry::Registry::from_toml`]; this module only says where
 //! it lives.
 
+use crate::exec::atomic::DEFAULT_TIMEOUT_MS;
 use crate::fees::{FeeModels, KalshiFees, PolymarketFees};
+use crate::risk::RiskLimits;
 use crate::solver::SolverConfig;
+use crate::types::Cents;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -22,6 +25,114 @@ pub struct Config {
     pub venues: Venues,
     pub registry: RegistrySettings,
     pub recorder: RecorderSettings,
+    pub risk: RiskSettings,
+    pub executor: ExecutorSettings,
+    pub discovery: DiscoverySettings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DiscoverySettings {
+    pub enabled: bool,
+    pub cache_dir: PathBuf,
+    pub cache_max_age_secs: u64,
+    /// Build the registry from venue metadata at startup instead of from the
+    /// registry file.
+    pub auto_discover_on_startup: bool,
+    /// Venue status filter. Empty takes every market the venue lists.
+    pub status: String,
+    /// One series, such as `KXBTCD`. Empty walks the whole venue, which on
+    /// Kalshi is over twelve thousand open markets across ten thousand events.
+    pub series: String,
+    pub max_pages: usize,
+    /// Whether an inferred group may be traded with a live order client. False
+    /// means discovery can find and price opportunities but a human must
+    /// promote the group before real money follows.
+    pub allow_inferred_live_orders: bool,
+}
+
+impl Default for DiscoverySettings {
+    fn default() -> Self {
+        DiscoverySettings {
+            enabled: true,
+            cache_dir: PathBuf::from(".cache/kalshi"),
+            cache_max_age_secs: 3_600,
+            auto_discover_on_startup: false,
+            status: "open".into(),
+            series: String::new(),
+            max_pages: 100,
+            allow_inferred_live_orders: false,
+        }
+    }
+}
+
+impl DiscoverySettings {
+    pub fn scope(&self) -> crate::discovery::DiscoveryScope {
+        crate::discovery::DiscoveryScope {
+            status: self.status.clone(),
+            series: (!self.series.is_empty()).then(|| self.series.clone()),
+            max_pages: self.max_pages.max(1),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RiskSettings {
+    pub max_per_event_cents: Cents,
+    pub max_per_theme_cents: Cents,
+    pub max_concurrent_trades: usize,
+    /// Realized loss that closes the day. Lives here rather than on
+    /// [`RiskLimits`] because the portfolio, not the risk check, is what tracks
+    /// and resets it.
+    pub max_daily_loss_cents: Cents,
+    /// Capital the engine starts with.
+    pub starting_capital_cents: Cents,
+}
+
+impl Default for RiskSettings {
+    fn default() -> Self {
+        let limits = RiskLimits::default();
+        RiskSettings {
+            max_per_event_cents: limits.max_per_event_cents,
+            max_per_theme_cents: limits.max_per_theme_cents,
+            max_concurrent_trades: limits.max_concurrent_trades,
+            max_daily_loss_cents: 100_000,
+            starting_capital_cents: 1_000_000,
+        }
+    }
+}
+
+impl RiskSettings {
+    pub fn limits(&self) -> RiskLimits {
+        RiskLimits {
+            max_per_event_cents: self.max_per_event_cents,
+            max_per_theme_cents: self.max_per_theme_cents,
+            max_concurrent_trades: self.max_concurrent_trades,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExecutorSettings {
+    /// True means simulate. The default is true and the CLI requires an
+    /// explicit flag to change it, because the failure modes are not symmetric:
+    /// an unintended paper run costs a rerun, an unintended live run costs money.
+    pub paper_mode: bool,
+    pub atomic_timeout_ms: u64,
+    /// Idle time before the venue is treated as unreachable.
+    pub max_idle_ms: u64,
+}
+
+impl Default for ExecutorSettings {
+    fn default() -> Self {
+        ExecutorSettings {
+            paper_mode: true,
+            atomic_timeout_ms: DEFAULT_TIMEOUT_MS,
+            max_idle_ms: crate::health::DEFAULT_MAX_IDLE_MS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -118,6 +229,26 @@ impl Config {
                 && self.engine.min_annualized_return >= 0.0,
             "engine.min_annualized_return must be a non-negative number"
         );
+        anyhow::ensure!(
+            self.risk.starting_capital_cents > 0,
+            "risk.starting_capital_cents must be positive"
+        );
+        anyhow::ensure!(
+            self.risk.max_daily_loss_cents > 0,
+            "risk.max_daily_loss_cents must be positive"
+        );
+        anyhow::ensure!(
+            self.risk.max_concurrent_trades > 0,
+            "risk.max_concurrent_trades must be positive"
+        );
+        anyhow::ensure!(
+            self.discovery.max_pages > 0,
+            "discovery.max_pages must be positive"
+        );
+        anyhow::ensure!(
+            self.executor.atomic_timeout_ms > 0,
+            "executor.atomic_timeout_ms must be positive"
+        );
         for (name, venue) in [
             ("kalshi", &self.venues.kalshi),
             ("polymarket", &self.venues.polymarket),
@@ -170,6 +301,23 @@ mod tests {
         assert_eq!(config.engine.max_position_size, 500);
         assert!(config.venues.kalshi.enabled);
         assert!(!config.venues.polymarket.enabled);
+        // The shipped default must be simulation, never live orders.
+        assert!(config.executor.paper_mode);
+        assert_eq!(config.risk.max_per_event_cents, 50_000);
+    }
+
+    #[test]
+    fn paper_mode_is_the_default_even_with_no_executor_block() {
+        assert!(Config::parse("").unwrap().executor.paper_mode);
+        assert!(
+            Config::parse("[executor]\natomic_timeout_ms = 250\n")
+                .unwrap()
+                .executor
+                .paper_mode
+        );
+        // Zero timeouts and zero capital are misconfigurations, not intent.
+        assert!(Config::parse("[executor]\natomic_timeout_ms = 0\n").is_err());
+        assert!(Config::parse("[risk]\nstarting_capital_cents = 0\n").is_err());
     }
 
     #[test]

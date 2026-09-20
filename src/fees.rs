@@ -4,6 +4,7 @@ pub trait FeeModel {
     fn taker_fee(&self, price: Cents, qty: i64) -> Cents;
 }
 
+#[derive(Clone)]
 pub struct KalshiFees {
     pub multiplier_numer: i64,
     pub multiplier_denom: i64,
@@ -33,7 +34,7 @@ impl FeeModel for KalshiFees {
 /// the real model. Zero is the honest placeholder rather than a guess: inventing
 /// a fee would suppress real signals, and inventing a wrong non-zero one would
 /// be indistinguishable from a modelling bug once the real schedule lands.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PolymarketFees {
     pub base_fee_bps: i64,
 }
@@ -43,7 +44,7 @@ pub struct PolymarketFees {
 /// A multi-venue position is only correctly costed if each leg is charged by its
 /// own venue, so the solver never takes a single fee model; it takes this and
 /// looks the leg's venue up.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct FeeModels {
     pub kalshi: KalshiFees,
     pub polymarket: PolymarketFees,

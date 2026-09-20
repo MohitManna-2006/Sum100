@@ -280,6 +280,24 @@ fn days_to_resolution(resolves_at_ms: u64, now_ms: u64) -> f64 {
     (remaining_ms / MS_PER_DAY).max(MIN_HORIZON_DAYS)
 }
 
+/// Worst price paid when taking `qty` from a walked ladder.
+///
+/// This, not the blended average, is the limit price a leg must carry. A limit
+/// at the average would have the venue refuse the deeper half of the very fill
+/// the solver costed, turning a priced trade into a partial one.
+pub fn worst_price_cents(ladder: &[Level], qty: i64) -> Option<Cents> {
+    let mut remaining = qty.max(0);
+    let mut worst = None;
+    for level in ladder {
+        if remaining == 0 {
+            break;
+        }
+        remaining -= remaining.min(level.size);
+        worst = Some(level.price);
+    }
+    worst
+}
+
 /// Rank by annualized return on locked capital, best first.
 ///
 /// Capital in a prediction market is trapped until the event resolves, so a one

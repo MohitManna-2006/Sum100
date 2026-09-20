@@ -33,7 +33,10 @@
 //! and why the loader interns every Kalshi member before any Polymarket one.
 //! `registry_parser_and_book_store_agree_on_contract_ids` pins it.
 
-use crate::types::{ContractId, Contracts, Side, Venue};
+use crate::{
+    clock::Clock,
+    types::{ContractId, Contracts, Side, Venue},
+};
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -147,6 +150,11 @@ pub struct ConstraintGroup {
     /// When the underlying event settles and the locked capital comes back.
     /// Ranking is meaningless without it, so it is required rather than optional.
     pub resolves_at_ms: u64,
+    /// True when this group was read off venue metadata rather than written by
+    /// a human. An inferred relation that is wrong does not go quiet, it emits
+    /// a confident arbitrage, so the engine refuses to trade one with a live
+    /// order client unless that is explicitly allowed.
+    pub inferred: bool,
 }
 
 impl ConstraintGroup {
@@ -185,7 +193,8 @@ impl std::error::Error for RegistryError {}
 
 /// Interned event identifier. Like [`ContractId`], the integer is positional and
 /// the human-readable key lives on the record it names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[serde(transparent)]
 pub struct EventId(pub u32);
 
 /// One real-world question, independent of how any venue lists it.
@@ -201,6 +210,9 @@ pub struct CanonicalEvent {
     pub description: String,
     pub resolves_at: DateTime<Utc>,
     pub resolution_source: String,
+    /// Optional grouping for risk limits: every Fed decision shares a theme
+    /// because they share a resolution source and would fail together.
+    pub theme: Option<String>,
     /// Placeholder for resolution-rule versioning, which lands in phase 8. A
     /// change here will mean "the venue rewrote the rules, re-verify the pair".
     pub resolution_rules_hash: u64,
@@ -247,7 +259,7 @@ impl Registry {
     ) -> Result<Self, RegistryError> {
         let mut registry = Registry::default();
         for (relation, resolves_at_ms) in relations {
-            registry.push_group(relation, resolves_at_ms)?;
+            registry.push_group(relation, resolves_at_ms, false)?;
         }
         Ok(registry)
     }
@@ -257,6 +269,7 @@ impl Registry {
         &mut self,
         relation: Relation,
         resolves_at_ms: u64,
+        inferred: bool,
     ) -> Result<GroupId, RegistryError> {
         let id = GroupId(u32::try_from(self.groups.len()).unwrap_or(u32::MAX));
         let members = relation.members();
@@ -282,6 +295,7 @@ impl Registry {
             relation,
             members,
             resolves_at_ms,
+            inferred,
         });
         Ok(id)
     }
@@ -354,6 +368,8 @@ struct EventEntry {
     description: String,
     resolves_at: String,
     resolution_source: String,
+    #[serde(default)]
+    theme: Option<String>,
     #[serde(default)]
     resolution_rules_hash: u64,
     #[serde(default)]
@@ -461,6 +477,7 @@ impl Registry {
                 description: entry.description.clone(),
                 resolves_at,
                 resolution_source: entry.resolution_source.clone(),
+                theme: entry.theme.clone(),
                 resolution_rules_hash: entry.resolution_rules_hash,
             });
             registry.event_by_key.insert(entry.id.clone(), event_id);
@@ -562,7 +579,7 @@ impl Registry {
                 "unknown group type {other:?}; expected complement, exhaustive, monotone, implies, or equivalent"
             ),
         };
-        self.push_group(relation, resolves_at_ms)?;
+        self.push_group(relation, resolves_at_ms, false)?;
         Ok(())
     }
 
@@ -675,6 +692,168 @@ fn strike_hundredths(ticker: &str) -> Option<i64> {
     let digit = |i: usize| i64::from(frac.as_bytes().get(i).copied().unwrap_or(b'0') - b'0');
     hundredths = hundredths.checked_add(digit(0) * 10 + digit(1))?;
     Some(hundredths)
+}
+
+impl Registry {
+    /// Fetch a cached Kalshi universe and build the runtime registry from it.
+    ///
+    /// This convenience entry point is intentionally equivalent to the startup
+    /// path used by the CLI with the default discovery scope.  Callers that
+    /// need a series or a custom freshness budget should use
+    /// [`Registry::from_discovery_with_scope`].
+    pub async fn from_discovery(
+        discovery: &crate::discovery::KalshiDiscovery,
+        cache: &crate::discovery::DiscoveryCache,
+    ) -> Result<Self> {
+        Self::from_discovery_with_scope(
+            discovery,
+            cache,
+            &crate::discovery::DiscoveryScope::default(),
+            3_600,
+        )
+        .await
+    }
+
+    pub async fn from_discovery_with_scope(
+        discovery: &crate::discovery::KalshiDiscovery,
+        cache: &crate::discovery::DiscoveryCache,
+        scope: &crate::discovery::DiscoveryScope,
+        max_age_secs: u64,
+    ) -> Result<Self> {
+        let clock = crate::clock::WallClock;
+        let universe = cache
+            .load_or_fetch(discovery, scope, max_age_secs, clock.now_ms())
+            .await?;
+        Self::from_universe(&universe)
+    }
+
+    /// Build the constraint graph from a venue snapshot instead of a file.
+    ///
+    /// Interning follows the snapshot's sorted ticker order, so two runs that
+    /// saw the same venue assign the same [`ContractId`]s — the same discipline
+    /// the file loader keeps, for the same reason.
+    ///
+    /// Every group produced here is marked `inferred`. An event whose close
+    /// time the venue did not publish is skipped rather than given a guessed
+    /// horizon: ranking would otherwise be arithmetic on a number nobody knows.
+    pub fn from_universe(universe: &crate::discovery::Universe) -> Result<Self> {
+        use crate::discovery::{event_close_times, infer_groups, to_relation};
+
+        let (inferred, report) = infer_groups(universe);
+        let closes = event_close_times(universe);
+        let mut registry = Registry::default();
+
+        // Events first, so a group can be bound to one as it is created.  The
+        // snapshot is sorted by the live discovery client, but sorting here as
+        // well keeps manually constructed/test universes deterministic.
+        let mut skipped_no_close = 0usize;
+        let mut raw_events: Vec<_> = universe.events.iter().collect();
+        raw_events.sort_by(|left, right| left.event_ticker.cmp(&right.event_ticker));
+        for raw in raw_events {
+            let Some(close) = closes.get(&raw.event_ticker) else {
+                continue;
+            };
+            let Ok(resolves_at) = DateTime::parse_from_rfc3339(close) else {
+                skipped_no_close += 1;
+                continue;
+            };
+            let id = EventId(u32::try_from(registry.events.len())?);
+            registry.events.push(CanonicalEvent {
+                id,
+                key: raw.event_ticker.clone(),
+                description: raw.title.clone(),
+                resolves_at: resolves_at.with_timezone(&Utc),
+                resolution_source: format!("kalshi:{}", raw.series_ticker),
+                // Series is the natural theme: every market under one series
+                // settles off the same source and fails together.
+                theme: (!raw.series_ticker.is_empty()).then(|| raw.series_ticker.clone()),
+                resolution_rules_hash: 0,
+            });
+            ensure!(
+                registry
+                    .event_by_key
+                    .insert(raw.event_ticker.clone(), id)
+                    .is_none(),
+                "duplicate event ticker {:?}",
+                raw.event_ticker
+            );
+        }
+
+        // Intern in ticker order.  Contract ids are positional and this is the
+        // invariant that keeps discovery, parser, and book-store ids aligned.
+        let mut raw_markets: Vec<_> = universe.markets.iter().collect();
+        raw_markets.sort_by(|left, right| left.ticker.cmp(&right.ticker));
+        for market in raw_markets {
+            if registry
+                .contracts
+                .get(Venue::Kalshi, &market.ticker)
+                .is_some()
+            {
+                continue;
+            }
+            let Some(event) = registry.event_by_key.get(&market.event_ticker).copied() else {
+                continue;
+            };
+            let contract = registry.contracts.intern(Venue::Kalshi, &market.ticker)?;
+            registry
+                .tickers
+                .entry(Venue::Kalshi)
+                .or_default()
+                .push(market.ticker.clone());
+            registry.bindings.insert(
+                contract,
+                ContractBinding {
+                    contract_id: contract,
+                    venue: Venue::Kalshi,
+                    venue_ticker: market.ticker.clone(),
+                    event,
+                    side: Side::Yes,
+                    // A single venue's own listing is the event by definition;
+                    // verification is a cross-venue question.
+                    verified: true,
+                },
+            );
+        }
+
+        let mut skipped_unbound = 0usize;
+        for group in &inferred {
+            let Some(relation) = to_relation(&registry.contracts, group) else {
+                skipped_unbound += 1;
+                continue;
+            };
+            let Some(event) = registry.event_by_key.get(&group.event_ticker).copied() else {
+                skipped_unbound += 1;
+                continue;
+            };
+            let resolves_at_ms = registry
+                .event(event)
+                .map(|e| u64::try_from(e.resolves_at.timestamp_millis()).unwrap_or(0))
+                .unwrap_or(0);
+            if registry.push_group(relation, resolves_at_ms, true).is_err() {
+                skipped_unbound += 1;
+            }
+        }
+
+        tracing::info!(
+            markets = report.markets,
+            events = report.events,
+            complements = report.complements,
+            exhaustive = report.exhaustive_sets,
+            ladders = report.ladders,
+            not_inferable = report.events_not_inferable,
+            skipped_unbound,
+            skipped_no_close,
+            groups = registry.groups.len(),
+            "registry inferred from venue metadata"
+        );
+        registry.check_no_conflicting_partitions()?;
+        Ok(registry)
+    }
+
+    /// Groups nobody has confirmed by hand.
+    pub fn inferred_count(&self) -> usize {
+        self.groups.iter().filter(|g| g.inferred).count()
+    }
 }
 
 #[cfg(test)]

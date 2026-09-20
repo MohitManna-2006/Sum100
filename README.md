@@ -4,10 +4,10 @@ Prediction markets routinely disagree with themselves. Four mutually exclusive o
 
 Fees kill most of them. That's the interesting part.
 
-Paper only. There is no order-placement code path and there won't be one.
+Paper trading by default. It *can* place real Kalshi orders — four separate gates stand in the way, and forgetting any of them leaves you in simulation.
 
-**Runs today:** authenticated Kalshi feed and raw recorder, book store with subscription-scoped gap detection and resync, byte-exact offline replay, the solver — four closed-form constraint checks, depth- and fee-aware costing, ranked by annualized return — and the engine task that loads a constraint graph from TOML, marks groups dirty, solves them, and publishes state.
-**Doesn't yet:** paper executor, Polymarket, an HTTP API, the coherence engine ([docs/COHERENCE.md](docs/COHERENCE.md)), UI.
+**Runs today:** authenticated Kalshi feed and raw recorder, book store with subscription-scoped gap detection and resync, byte-exact offline replay, the solver — four closed-form constraint checks, depth- and fee-aware costing, ranked by annualized return — the engine task that loads a constraint graph from TOML, marks groups dirty and solves them, and the execution layer: fill-or-kill multi-leg orders, a portfolio with mark-to-market and a daily loss limit, venue health, and position limits.
+**Doesn't yet:** unwind a legged position, Polymarket, an HTTP API, the coherence engine ([docs/COHERENCE.md](docs/COHERENCE.md)), UI.
 
 Design is [ARCHITECTURE.md](ARCHITECTURE.md), schedule is [PLAN.md](PLAN.md). This file is the only source for what actually runs. [README.reference.md](README.reference.md) is the original import under the old name Parity, kept verbatim, historical only.
 
@@ -32,6 +32,8 @@ Demo is the default everywhere. Production is `--prod`, and it logs a warning wh
 make registry-validate                                        # load the graph, no network
 make scan-replay FILE=data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz
 make scan-prod SECONDS=70                                     # live; tickers come from the registry
+make trade-replay FILE=... CAPITAL=500000                     # paper fills, nothing placed
+make trade-paper-prod SECONDS=70                              # live feed, simulated fills
 
 make record TICKERS=YOUR-DEMO-TICKER                          # record demo
 make dump-prod TICKERS=KXBTCD-26SEP1417-T76999.99 SECONDS=70  # live bid/ask table
@@ -132,6 +134,24 @@ That last point is the sharp edge. `ContractId` is positional, assigned in inter
 
 `config/example.toml` holds the `[engine]` thresholds, per-venue settings, and the registry path. Unknown keys are rejected: a misspelled `max_positon_size` fails at startup instead of quietly leaving a default in place.
 
+## Execution
+
+This is the only part of the system that can lose money, so the defaults are asymmetric: an unintended paper run costs a rerun, an unintended live run costs cash.
+
+**Four gates** stand between a command line and a real Kalshi order. `--live-orders` on the command, `--live` (a recording can never place anything), `--prod`, and `executor.paper_mode = false` in the config. Miss any one and you get [`PaperOrderClient`](src/exec/paper.rs). The engine checks a fifth time on the path that actually spends: a live client with `allow_live_orders` unset is refused there, not at construction. There is deliberately no Makefile recipe that passes `--live-orders`.
+
+**Fill-or-kill, always.** An arbitrage is one position, not two trades — buying one leg and missing the other turns a risk-free trade into a naked directional bet at a price nobody chose. The usual answer, "cancel the other order", does not work: a *filled* order cannot be cancelled, only unwound by trading back across the spread. Fill-or-kill pushes that to the venue, which can enforce it. When a leg escapes anyway, `ExecutionError::Legged` says so in those words and hands back the fills needing unwind, rather than reporting a tidy cancellation that never happened. Nothing is booked from half a trade, and the counter is called `trades_needing_reconciliation`. A timeout is its own case: the futures are dropped, so whether anything reached the venue is genuinely unknown, and the error says that too.
+
+Legs go out concurrently. That is not an optimization — placing them in sequence would price the second off a book that has already seen the first, which is the move that removes the edge.
+
+**Paper fills walk the book.** Same depth walk and same fee schedule the solver costed with, because filling a 500-contract order at top of book would flatter every result in exactly the direction that makes a bad strategy look good. A book that moved past the limit is a miss, not a fill at a worse price.
+
+**Portfolio** (`src/portfolio.rs`). Capital leaves on entry and comes back as the payoff at settlement. Positions mark at the **bid**, not the mid — valuing at the mid books an unrealized profit the spread takes back on exit, and a leg with no bid at all marks at zero rather than at cost. The daily loss limit resets at calendar UTC midnight, not 24 hours after whatever time the process started, because two restarts in a day must not hand out two fresh budgets. Profits do not offset the day's losses: the limit exists to stop a bad day.
+
+**Health** (`src/health.rs`) is the question the freshness gate cannot answer. A book looks fine while the socket behind it has been dead for a minute — an idle far strike and a dead feed produce identical books. A venue starts disconnected and earns health from data; three consecutive errors stop trading and one success clears them; a specific failure is never overwritten by a vaguer one.
+
+**Risk** (`src/risk.rs`) limits capital *locked*, not expected profit. The solver proves a trade cannot lose at settlement — but only if the contracts resolve the way the registry says, and the registry is a human-maintained file. The real exposure is concentration on one resolution rule being written down wrong, so limits are per event, per theme (all Fed decisions share a source and fail together), and on concurrent positions. Every check asks what exposure *would become*, so one trade cannot step over a limit it was under.
+
 ## Recording and replay
 
 Every inbound frame is written **before parsing** to `OUT/{demo,production}/kalshi-YYYY-MM-DD.ndjson.gz`, one file per venue per UTC receipt day, one recorder per directory behind an OS lock. Each line is an envelope — receipt milliseconds, monotonic sequence, kind, raw — and for text the raw payload is a JSON string that decodes back to the original bytes under a single-trailing-LF rule. Whitespace, field order, Unicode escapes, and malformed JSON all survive, because the recorder never parses venue JSON. Feed lifecycle events ride the same stream as `control` envelopes so replay reproduces the live resync path. Files are concatenated gzip members flushed every two seconds: read them with `MultiGzDecoder`, Python `gzip`, or `gzip -dc`. Raw files under `data/` are gitignored; curated fixtures are tracked. Byte-level format, restart, and crash-recovery rules are in [ARCHITECTURE.md](ARCHITECTURE.md) §4.7.
@@ -148,6 +168,8 @@ Both `dump` and `replay` print a digest: SHA-256 per contract over its canonical
 ## Tests
 
 `make check` is fmt, clippy `-D warnings`, and the suite. Parser and book-store tests replay the full stage 2 capture to a pinned final bid/ask and cover complement conversion, gap and resync transitions, floor drift, and crossed books. Recorder tests assert byte-identical read-back, member concatenation, and sequence continuation across restarts. Signing tests verify RSA-PSS against a throwaway key.
+
+Execution tests (`tests/phase6.rs`) run the whole path: an edge becomes a position becomes a mark, and each gate gets its own test — unhealthy venue, no capital, event limit, closed day reopening at midnight, a legged trade flagged rather than booked, and a live client refused without the opt-in. A real recording replays in paper mode and places nothing.
 
 Engine tests cover registry loading, that the registry, parser, and book store agree on every contract id, dirty marking (including that a gap or disconnect marks nothing, since the solver would only reject it), the loop finding both a crossed book and a ladder inversion in one update, gap-driven resync, and replay determinism — the same capture twice produces byte-identical signal logs and byte-identical serialized state broadcasts.
 

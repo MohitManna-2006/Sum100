@@ -24,6 +24,7 @@ pace_flag    := $(if $(PACE),--pace $(PACE),)
 tickers_flag := $(if $(TICKERS),--tickers $(TICKERS),)
 registry_flag := $(if $(REGISTRY),--registry $(REGISTRY),)
 signals_flag := $(if $(SIGNALS),--signals-out $(SIGNALS),)
+capital_flag := $(if $(CAPITAL),--capital $(CAPITAL),)
 CONFIG    ?= config/example.toml
 # scan takes its tickers from the registry, not the command line.
 need-tickers-free =
@@ -32,7 +33,7 @@ probe_ticker := $(or $(TICKER),$(TICKERS))
 need-tickers = $(if $(strip $(TICKERS)),,$(error TICKERS is required, e.g. make dump TICKERS=KXBTCD-...))
 need-ticker  = $(if $(strip $(probe_ticker)),,$(error TICKER is required, e.g. make probe TICKER=KXBTCD-...))
 
-.PHONY: help record record-prod dump dump-prod dump-digest replay probe probe-prod markets markets-prod registry-validate registry-validate-prod scan-replay scan-prod check build
+.PHONY: help record record-prod dump dump-prod dump-digest replay probe probe-prod markets markets-prod registry-validate registry-validate-prod scan-replay scan-prod trade-replay trade-paper-prod check build
 
 help:
 	@echo "Sum100 operator recipes (wrap cargo run --release --)."
@@ -48,10 +49,12 @@ help:
 	@echo "  make registry-validate            (offline; add -prod for live metadata)"
 	@echo "  make scan-replay FILE=data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz"
 	@echo "  make scan-prod SECONDS=70         (tickers come from the registry)"
+	@echo "  make trade-replay FILE=...        (paper fills, no orders placed)"
+	@echo "  make trade-paper-prod SECONDS=70  (live feed, simulated fills)"
 	@echo "  make check"
 	@echo "  make build"
 	@echo ""
-	@echo "Knobs: TICKERS TICKER SECONDS OUT FILE DIGEST SESSION PACE SERIES EXTRA VENUE CONFIG REGISTRY SIGNALS"
+	@echo "Knobs: TICKERS TICKER SECONDS OUT FILE DIGEST SESSION PACE SERIES EXTRA VENUE CONFIG REGISTRY SIGNALS CAPITAL"
 	@echo "FILE defaults to data/production/kalshi-YYYY-MM-DD.ndjson.gz (UTC today)"
 	@echo "No SECONDS means run until Ctrl-C (record/dump). EXTRA='--interval-ms 250'"
 
@@ -96,6 +99,16 @@ scan-replay:
 
 scan-prod:
 	$(need-tickers-free)$(CARGO_RUN) scan --live --prod --config $(CONFIG) $(registry_flag) --out $(OUT) $(seconds) $(signals_flag) $(EXTRA)
+
+# Paper trading. Fills are simulated against the live book; no order is placed.
+trade-replay:
+	$(CARGO_RUN) trade --replay $(FILE) --config $(CONFIG) $(registry_flag) $(session_flag) $(pace_flag) $(capital_flag) $(signals_flag) $(EXTRA)
+
+trade-paper-prod:
+	$(CARGO_RUN) trade --live --prod --paper-mode --config $(CONFIG) $(registry_flag) --out $(OUT) $(seconds) $(capital_flag) $(signals_flag) $(EXTRA)
+
+# There is deliberately no recipe that passes --live-orders. Spending real money
+# is a thing an operator types out in full, with the flags in front of them.
 
 check:
 	cargo fmt --all -- --check

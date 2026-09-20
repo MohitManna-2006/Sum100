@@ -253,7 +253,8 @@ impl std::error::Error for BookApplyError {}
 /// detected and state is owned. Converting in the feed would make it a silent
 /// participant in book state and would mean a translation bug and a venue bug
 /// look identical in the recorded corpus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Side {
     Yes,
     No,
@@ -463,7 +464,8 @@ mod tests {
 }
 
 /// Interned identifier; ticker strings stay outside downstream hot paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(transparent)]
 pub struct ContractId(pub u32);
 
 #[derive(Debug, Default)]

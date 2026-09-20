@@ -57,8 +57,10 @@ impl Environment {
 }
 
 pub struct Credentials {
-    key_id: HeaderValue,
-    key: RsaPrivateKey,
+    /// Readable so the order client can sign its own REST requests exactly the
+    /// way the websocket handshake signs its own, from one loaded key.
+    pub key_id: HeaderValue,
+    pub key: RsaPrivateKey,
 }
 impl Credentials {
     pub fn from_env() -> Result<Self> {

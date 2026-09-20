@@ -7,8 +7,8 @@ The estimation path is specified in [docs/COHERENCE.md](docs/COHERENCE.md).
 
 The imported plan is a roadmap, not a claim that its future components exist.
 Phase 1 stage 2, **phase 2 (book store)**, phase 3 (replay), phase 4 (solver
-fast paths and costing), and **phase 5 (registry loading and the engine task)**
-are implemented. Later session
+fast paths and costing), **phase 5 (registry loading and the engine task)**, and
+**phase 6 (execution, portfolio, health, risk)** are implemented. Later session
 decisions supersede the original `new_size`, bid/ask normalization,
 unauthenticated public WebSocket, and parsed-event recorder assumptions.
 
@@ -52,12 +52,17 @@ unauthenticated public WebSocket, and parsed-event recorder assumptions.
   Evidence in docs/phase-5-summary.md. Both recorded sessions replay coherent:
   zero candidates, which is the predicted result. `scan --live` is wired but has
   not been pointed at a live socket.
+- Phase 6: `exec/` (order client trait, fill-or-kill atomic multi-leg trades,
+  paper and Kalshi clients), `portfolio.rs` (capital, positions, mark-to-market
+  at the bid, UTC-midnight loss reset), `health.rs`, `risk.rs` (per-event,
+  per-theme, concurrency limits), and the `trade` subcommand. Reverses the
+  no-order-placement scope line above. Evidence in docs/phase-6-summary.md.
 - Coherence engine: design accepted in [docs/COHERENCE.md](docs/COHERENCE.md);
   implementation is phases 9 and 10, not started.
 - Pending: hour-long endurance session; thirty-minute UI side-by-side; a live
-  `scan` run and a real candidate log; per-group freshness policy (a wide ladder
-  is rarely evaluable at 500 ms); tick-to-signal latency; HTTP API; execution;
-  second venue; coherence engine; UI.
+  `scan`/`trade` run and a real candidate log; per-group freshness policy (a
+  wide ladder is rarely evaluable at 500 ms); tick-to-signal latency; unwinding
+  a legged position; HTTP API; second venue; coherence engine; UI.
 
 Use [README.md](README.md) for working commands and setup. The supplied original
 README is preserved verbatim as [README.reference.md](README.reference.md);
@@ -89,7 +94,13 @@ Phases 0 through 5 constitute a complete, defensible project. That is roughly fo
 
 ### What deliberately stays out of scope
 
-- Real order placement. Not now, not later.
+- ~~Real order placement. Not now, not later.~~ **Reversed in phase 6**
+  (September 20, 2026). `src/exec/` can place Kalshi orders. Paper mode is the
+  default everywhere and four independent gates stand between a command line
+  and a real order: the `--live-orders` flag, `--live`, `--prod`, and
+  `executor.paper_mode = false` in the config. The original line is kept rather
+  than deleted because a reader should be able to see that this was a decision,
+  not an oversight.
 - More than two venues.
 - Maker fee and queue position modeling.
 - Any machine learning component. There is no place in this system where a model would beat arithmetic, and adding one would be decoration. The coherence engine is a projection, not a model; it introduces no view.

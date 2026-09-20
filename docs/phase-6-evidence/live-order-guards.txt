@@ -1,0 +1,13 @@
+# Four independent gates stand between a command line and a real order.
+
+$ sum100 trade --replay data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz --live-orders
+Error: --live-orders needs --live; a recording cannot place orders
+
+$ sum100 trade --live --live-orders
+Error: --live-orders needs --prod
+
+$ sum100 trade --live --prod --live-orders
+Error: --live-orders needs executor.paper_mode = false in config/example.toml
+
+$ sum100 trade --live --prod --live-orders --paper-mode
+error: the argument '--live-orders' cannot be used with '--paper-mode'

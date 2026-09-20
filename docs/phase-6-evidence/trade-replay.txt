@@ -1,0 +1,26 @@
+$ sum100 trade --replay data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz --capital 1000000 --daily-loss-limit 20000 --max-per-event 50000
+# Paper mode (the default). The session is coherent, so nothing is placed.
+
+
+events received      14460
+books updated        14460
+groups dirtied       28920
+groups evaluated     28920
+candidates found     0
+signals accepted     0
+sequence gaps        0
+states broadcast     14460 (lagged 0)
+books                80 live, 0 resyncing, 0 uninitialized
+  snapshots 80, deltas 14380, skipped 0, crossed seen 0
+
+trades placed        0
+trades missed        0
+
+capital              1000000 available, 0 locked
+open positions       0
+pnl                  0 realized, 0 unrealized
+daily loss           0 of 20000
+
+rejections           14304
+  not live             79
+  stale                14225
