@@ -1,7 +1,14 @@
-use crate::types::{Cents, Venue};
+use crate::types::{Cents, ContractId, Venue};
+use std::collections::HashMap;
 
 pub trait FeeModel {
-    fn taker_fee(&self, price: Cents, qty: i64) -> Cents;
+    /// Taker fee for `qty` contracts filled at `price`.
+    ///
+    /// The contract is passed because a venue may price the same trade
+    /// differently per market: Polymarket sets a rate per market, so a model
+    /// that saw only price and size could not charge the right one. Kalshi's
+    /// schedule is uniform and ignores it.
+    fn taker_fee(&self, contract: ContractId, price: Cents, qty: i64) -> Cents;
 }
 
 #[derive(Clone)]
@@ -20,32 +27,89 @@ impl Default for KalshiFees {
 }
 
 impl FeeModel for KalshiFees {
-    fn taker_fee(&self, price: Cents, qty: i64) -> Cents {
+    /// Uniform across markets, so the contract is not consulted.
+    fn taker_fee(&self, _contract: ContractId, price: Cents, qty: i64) -> Cents {
         let numer = 7 * qty * price * (100 - price) * self.multiplier_numer;
         let denom = 10_000 * self.multiplier_denom;
         (numer + denom - 1) / denom
     }
 }
 
-/// Placeholder Polymarket schedule, and it now understates.
+/// What the venue charges a taker, by market category.
 ///
-/// The venue charges takers `size * rate * p * (1 - p)`, with `rate` set per
-/// market and exposed as Gamma's `feeType`: `crypto_fees_v2` is 0.07,
-/// `sports_fees_v3` 0.05, `politics_fees` and finance 0.04, `zero_fees` nothing.
-/// Live crypto markets — the ones a BTC ladder would pair against — report
-/// `feesEnabled: true`, so at 50c a Crypto leg costs `0.07 * 0.25`, about 1.75%
-/// of the dollar it settles for.
+/// Rates are the venue's published figures, held in basis points so the fee
+/// stays integer arithmetic. Makers are never charged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeeCategory {
+    Crypto,
+    Sports,
+    PoliticsFinance,
+    Zero,
+}
+
+impl FeeCategory {
+    /// Map Gamma's `feeType` onto a category.
+    ///
+    /// An unrecognized value is treated as the most expensive category rather
+    /// than as free. A new `feeType` is far more likely to be a category this
+    /// list has not caught up with than a market that stopped charging, and
+    /// guessing "free" is the one error that manufactures edge.
+    pub fn from_fee_type(fee_type: &str) -> Self {
+        match fee_type {
+            "zero_fees" => FeeCategory::Zero,
+            t if t.starts_with("crypto") => FeeCategory::Crypto,
+            t if t.starts_with("sports") => FeeCategory::Sports,
+            t if t.starts_with("politics") || t.starts_with("finance") => {
+                FeeCategory::PoliticsFinance
+            }
+            _ => FeeCategory::Crypto,
+        }
+    }
+
+    pub fn rate_bps(self) -> i64 {
+        match self {
+            FeeCategory::Crypto => 700,
+            FeeCategory::Sports => 500,
+            FeeCategory::PoliticsFinance => 400,
+            FeeCategory::Zero => 0,
+        }
+    }
+}
+
+/// Polymarket's taker schedule: `size * rate * p * (1 - p)`, per market.
 ///
-/// `base_fee_bps` still defaults to zero, which means a cross-venue candidate is
-/// priced on the Kalshi leg alone and its edge is *overstated*. That is the
-/// dangerous direction, and it is the reason the real model is the next piece of
-/// work rather than a later one. It is left at zero rather than guessed because
-/// the rate is per market, and a single wrong non-zero figure applied to every
-/// market would be indistinguishable from a modelling bug once the real schedule
-/// lands. Nothing trades Polymarket yet, so nothing acts on it today.
+/// The rate is not uniform across the venue. Gamma reports it per market as
+/// `feeType`, so this holds one category per contract and falls back to the
+/// most expensive when a contract has not been registered.
+///
+/// That fallback is the whole safety argument. Charging too much costs a missed
+/// opportunity; charging too little invents edge that is not there and puts real
+/// money behind it. An unregistered contract is an unknown, and the safe reading
+/// of an unknown fee is the highest one the venue charges — which is also why
+/// this is no longer a zero default.
 #[derive(Clone, Default)]
 pub struct PolymarketFees {
-    pub base_fee_bps: i64,
+    by_contract: HashMap<ContractId, FeeCategory>,
+}
+
+impl PolymarketFees {
+    /// Record the category a market charges, as discovery learns it.
+    pub fn register(&mut self, contract: ContractId, fee_type: &str) {
+        self.by_contract
+            .insert(contract, FeeCategory::from_fee_type(fee_type));
+    }
+
+    /// The category charged on this contract, or the conservative default.
+    pub fn category(&self, contract: ContractId) -> FeeCategory {
+        self.by_contract
+            .get(&contract)
+            .copied()
+            .unwrap_or(FeeCategory::Crypto)
+    }
+
+    pub fn is_registered(&self, contract: ContractId) -> bool {
+        self.by_contract.contains_key(&contract)
+    }
 }
 
 /// The fee schedule for every venue the engine can trade, selected by [`Venue`].
@@ -69,15 +133,22 @@ impl FeeModels {
 }
 
 impl FeeModel for PolymarketFees {
-    fn taker_fee(&self, price: Cents, qty: i64) -> Cents {
-        let tail = if price < 100 - price {
-            price
-        } else {
-            100 - price
-        };
-        let numer = self.base_fee_bps * qty * tail * 2;
-        let denom = 10_000;
-        (numer + denom - 1) / denom
+    /// `ceil(qty * rate * p * (1 - p))` in cents, with `p` the price in dollars.
+    ///
+    /// Written over integers, like the Kalshi schedule beside it: a float here
+    /// would let two ways of reaching the same fill round differently, and the
+    /// property that splitting an order never saves money is asserted against
+    /// exact arithmetic. `i128` because `qty * bps * price * (100 - price)` can
+    /// reach 10^13 before the divide.
+    fn taker_fee(&self, contract: ContractId, price: Cents, qty: i64) -> Cents {
+        let rate_bps = self.category(contract).rate_bps();
+        // Dollars: qty * (bps / 10_000) * (price / 100) * ((100 - price) / 100).
+        // Cents is a hundred times that, so the divisor loses one factor of 100.
+        let numer =
+            i128::from(qty) * i128::from(rate_bps) * i128::from(price) * i128::from(100 - price);
+        const DENOM: i128 = 10_000 * 100;
+        let cents = numer.div_euclid(DENOM) + i128::from(numer.rem_euclid(DENOM) != 0);
+        i64::try_from(cents).unwrap_or(i64::MAX)
     }
 }
 
@@ -92,10 +163,86 @@ mod tests {
     #[test]
     fn kalshi_taker_fee_matches_published_schedule() {
         let fees = KalshiFees::default();
-        assert_eq!(fees.taker_fee(4, 100), 27);
-        assert_eq!(fees.taker_fee(62, 100), 165);
-        assert_eq!(fees.taker_fee(29, 100), 145);
-        assert_eq!(fees.taker_fee(3, 100), 21);
+        assert_eq!(fees.taker_fee(ContractId(0), 4, 100), 27);
+        assert_eq!(fees.taker_fee(ContractId(0), 62, 100), 165);
+        assert_eq!(fees.taker_fee(ContractId(0), 29, 100), 145);
+        assert_eq!(fees.taker_fee(ContractId(0), 3, 100), 21);
+    }
+
+    /// The venue's published formula is `C * rate * p * (1 - p)` in USDC, so a
+    /// hundred Crypto contracts at fifty cents cost `100 * 0.07 * 0.25` of a
+    /// dollar: 1.75, or 175 cents. Pinned because the obvious mis-derivation —
+    /// scaling by the notional as well as the price — halves it, and a fee that
+    /// reads half its true size manufactures edge that is not there.
+    #[test]
+    fn polymarket_taker_fee_matches_the_published_formula() {
+        let mut fees = PolymarketFees::default();
+        fees.register(ContractId(0), "crypto_fees_v2");
+        fees.register(ContractId(1), "sports_fees_v3");
+        fees.register(ContractId(2), "politics_fees");
+        fees.register(ContractId(3), "zero_fees");
+
+        assert_eq!(fees.taker_fee(ContractId(0), 50, 100), 175);
+        assert_eq!(fees.taker_fee(ContractId(1), 50, 100), 125);
+        assert_eq!(fees.taker_fee(ContractId(2), 50, 100), 100);
+        assert_eq!(fees.taker_fee(ContractId(3), 50, 100), 0);
+
+        // The curve peaks at the midpoint and vanishes at both ends, which is
+        // what makes a near-certain outcome cheap to take.
+        assert_eq!(fees.taker_fee(ContractId(0), 10, 100), 63);
+        assert_eq!(fees.taker_fee(ContractId(0), 90, 100), 63);
+        assert_eq!(fees.taker_fee(ContractId(0), 0, 100), 0);
+        assert_eq!(fees.taker_fee(ContractId(0), 100, 100), 0);
+    }
+
+    /// A market nobody registered is charged the most expensive category, not
+    /// nothing. Charging too much costs an opportunity; charging too little
+    /// puts money behind edge that does not exist.
+    #[test]
+    fn an_unregistered_market_is_charged_the_dearest_rate() {
+        let fees = PolymarketFees::default();
+        assert!(!fees.is_registered(ContractId(7)));
+        assert_eq!(fees.category(ContractId(7)), FeeCategory::Crypto);
+        assert_eq!(fees.taker_fee(ContractId(7), 50, 100), 175);
+
+        // And an unfamiliar feeType is read the same way: a category this list
+        // has not caught up with, rather than a market that stopped charging.
+        let mut later = PolymarketFees::default();
+        later.register(ContractId(7), "some_new_fees_v9");
+        assert_eq!(later.category(ContractId(7)), FeeCategory::Crypto);
+    }
+
+    /// Registration is per market, so two contracts on one venue can be charged
+    /// differently in the same trade.
+    #[test]
+    fn rates_are_held_per_market_not_per_venue() {
+        let mut fees = PolymarketFees::default();
+        fees.register(ContractId(0), "zero_fees");
+        fees.register(ContractId(1), "crypto_fees_v2");
+        assert_eq!(fees.taker_fee(ContractId(0), 50, 100), 0);
+        assert_eq!(fees.taker_fee(ContractId(1), 50, 100), 175);
+    }
+
+    /// The same property the Kalshi schedule holds: splitting a fill can never
+    /// cost less than taking it at once, or the solver could be talked into a
+    /// cheaper fee than it will actually be charged.
+    #[test]
+    fn polymarket_fees_never_fall_and_splitting_never_saves() {
+        let mut fees = PolymarketFees::default();
+        fees.register(ContractId(0), "crypto_fees_v2");
+        for price in 0..=100 {
+            let mut previous = fees.taker_fee(ContractId(0), price, 0);
+            for qty in 0..40 {
+                let whole = fees.taker_fee(ContractId(0), price, qty);
+                assert!(whole >= previous, "fee fell at p={price} q={qty}");
+                previous = whole;
+                for split in 0..=qty {
+                    let parts = fees.taker_fee(ContractId(0), price, split)
+                        + fees.taker_fee(ContractId(0), price, qty - split);
+                    assert!(parts >= whole, "splitting saved at p={price} q={qty}");
+                }
+            }
+        }
     }
 }
 
@@ -115,7 +262,7 @@ mod ladder_tests {
                         multiplier_numer: numer,
                         multiplier_denom: denom,
                     };
-                    let fee = model.taker_fee(price, qty);
+                    let fee = model.taker_fee(ContractId(0), price, qty);
                     let exact_numerator = 7i128
                         * i128::from(qty)
                         * i128::from(price)
@@ -131,11 +278,11 @@ mod ladder_tests {
                         charged - exact_numerator < denominator,
                         "excess cent at p={price}, q={qty}"
                     );
-                    assert_eq!(fee, model.taker_fee(100 - price, qty));
+                    assert_eq!(fee, model.taker_fee(ContractId(0), 100 - price, qty));
                 }
             }
         }
-        assert_eq!(KalshiFees::default().taker_fee(0, 100), 0);
-        assert_eq!(KalshiFees::default().taker_fee(100, 100), 0);
+        assert_eq!(KalshiFees::default().taker_fee(ContractId(0), 0, 100), 0);
+        assert_eq!(KalshiFees::default().taker_fee(ContractId(0), 100, 100), 0);
     }
 }

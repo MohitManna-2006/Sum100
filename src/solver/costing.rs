@@ -16,7 +16,7 @@ use crate::solver::BookSource;
 use crate::solver::types::{
     Candidate, CandidateLeg, Leg, MIN_HORIZON_DAYS, Opportunity, RejectReason, SolverConfig, Walk,
 };
-use crate::types::{Book, Cents, Level, Side};
+use crate::types::{Book, Cents, ContractId, Level, Side};
 
 /// A binary contract settles at exactly $1 or $0.
 pub const PAYOFF_PER_CONTRACT_CENTS: Cents = 100;
@@ -106,7 +106,12 @@ pub fn total_cost_cents(ladder: &[Level], qty: i64) -> Cents {
 /// can only suppress a marginal signal; understating puts on a losing trade that
 /// looked profitable. That asymmetry is the whole reason the rounding is here
 /// rather than applied once to a blended average price.
-pub fn apply_fees_per_level(ladder: &[Level], qty: i64, fees: &dyn FeeModel) -> Cents {
+pub fn apply_fees_per_level(
+    ladder: &[Level],
+    contract: ContractId,
+    qty: i64,
+    fees: &dyn FeeModel,
+) -> Cents {
     let mut remaining = qty.max(0);
     let mut fee = 0;
     for level in ladder {
@@ -114,7 +119,7 @@ pub fn apply_fees_per_level(ladder: &[Level], qty: i64, fees: &dyn FeeModel) -> 
             break;
         }
         let take = remaining.min(level.size);
-        fee += fees.taker_fee(level.price, take);
+        fee += fees.taker_fee(contract, level.price, take);
         remaining -= take;
     }
     fee
@@ -214,7 +219,7 @@ pub fn cost_candidate<B: BookSource + ?Sized>(
         let mut fee = 0;
         for (leg, ladder) in candidate.legs.iter().zip(&ladders) {
             cost += total_cost_cents(ladder, qty);
-            fee += apply_fees_per_level(ladder, qty, fees.for_venue(leg.venue));
+            fee += apply_fees_per_level(ladder, leg.contract_id, qty, fees.for_venue(leg.venue));
         }
         let net = payoff_per_unit * qty - cost - fee;
         if best.is_none_or(|(_, _, _, best_net)| net > best_net) {
@@ -256,7 +261,12 @@ pub fn cost_candidate<B: BookSource + ?Sized>(
             side: leg.side,
             qty,
             total_cost_cents: total_cost_cents(ladder, qty),
-            fee_cents: apply_fees_per_level(ladder, qty, fees.for_venue(leg.venue)),
+            fee_cents: apply_fees_per_level(
+                ladder,
+                leg.contract_id,
+                qty,
+                fees.for_venue(leg.venue),
+            ),
         })
         .collect();
 
@@ -353,11 +363,14 @@ mod tests {
     fn fees_are_charged_once_per_level_and_never_understate() {
         let fees = KalshiFees::default();
         let consumed = ladder(&[(40, 10), (42, 20)]);
-        let per_level = apply_fees_per_level(&consumed, 30, &fees);
-        assert_eq!(per_level, fees.taker_fee(40, 10) + fees.taker_fee(42, 20));
+        let per_level = apply_fees_per_level(&consumed, ContractId(0), 30, &fees);
+        assert_eq!(
+            per_level,
+            fees.taker_fee(ContractId(0), 40, 10) + fees.taker_fee(ContractId(0), 42, 20)
+        );
         // Blending to an average price and rounding once would undercharge.
         let blended_price = (10 * 40 + 20 * 42) / 30;
-        assert!(per_level >= fees.taker_fee(blended_price, 30));
+        assert!(per_level >= fees.taker_fee(ContractId(0), blended_price, 30));
     }
 
     #[test]

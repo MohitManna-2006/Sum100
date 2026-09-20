@@ -113,7 +113,12 @@ impl PaperOrderClient {
                 order.limit_price
             )));
         }
-        let fee = apply_fees_per_level(&walk.consumed, quantity, self.fees.for_venue(book.venue));
+        let fee = apply_fees_per_level(
+            &walk.consumed,
+            book.contract_id,
+            quantity,
+            self.fees.for_venue(book.venue),
+        );
 
         Ok(OrderFill {
             order_id: format!(

@@ -288,6 +288,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ContractId;
 
     #[test]
     fn the_shipped_example_parses() {
@@ -347,10 +348,10 @@ mod tests {
         assert_eq!(fees.kalshi.multiplier_denom, 1000);
         // Half the schedule is half the charge, to the cent, with the ceiling.
         use crate::fees::FeeModel;
-        assert_eq!(fees.kalshi.taker_fee(60, 100), 84);
-        assert_eq!(KalshiFees::default().taker_fee(60, 100), 168);
+        assert_eq!(fees.kalshi.taker_fee(ContractId(0), 60, 100), 84);
+        assert_eq!(KalshiFees::default().taker_fee(ContractId(0), 60, 100), 168);
         // An absent multiplier is exactly 1, not 0.999-something.
         let plain = Config::parse("").unwrap().fee_models();
-        assert_eq!(plain.kalshi.taker_fee(60, 100), 168);
+        assert_eq!(plain.kalshi.taker_fee(ContractId(0), 60, 100), 168);
     }
 }

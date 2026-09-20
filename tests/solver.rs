@@ -182,7 +182,10 @@ fn fed_example_at_95_cents_is_accepted_with_the_expected_net_edge() {
     let opportunity = &found[0];
 
     let fees = KalshiFees::default();
-    let expected_fees: Cents = prices.iter().map(|p| fees.taker_fee(*p, 100)).sum();
+    let expected_fees: Cents = prices
+        .iter()
+        .map(|p| fees.taker_fee(ContractId(0), *p, 100))
+        .sum();
     assert_eq!(expected_fees, 21 + 168 + 145 + 21);
     assert_eq!(opportunity.qty, 100);
     assert_eq!(opportunity.guaranteed_payoff_cents, 10_000);
@@ -228,11 +231,11 @@ fn fed_example_table_body() {
         let mut fee = 0;
         for price in prices {
             cost += price * 100;
-            fee += fees.taker_fee(price, 100);
+            fee += fees.taker_fee(ContractId(0), price, 100);
             println!(
                 "{label:<14} {price:>10} {:>12} {:>12} {:>12}",
                 price * 100,
-                fees.taker_fee(price, 100),
+                fees.taker_fee(ContractId(0), price, 100),
                 cost + fee
             );
         }
@@ -487,11 +490,15 @@ fn cross_venue_pair_is_priced_per_venue_and_gated_on_verification() {
     assert_eq!(opportunity.legs[0].venue, Venue::Kalshi);
     assert_eq!(opportunity.legs[1].venue, Venue::Polymarket);
     assert_eq!(opportunity.gross_cents, 500);
-    // Only the Kalshi leg is charged; the Polymarket stub models no taker fee
-    // until phase 7 supplies the real schedule.
+    // Each leg is charged by its own venue's schedule. The Polymarket leg is
+    // not registered with a category here, so it pays the dearest one, which is
+    // the conservative reading of a market whose rate is unknown. This used to
+    // be zero, and a five-cent gross edge that looked like 326 net is really
+    // 151 once both venues are paid — the difference between a trade worth
+    // doing and one that barely clears its costs.
     assert_eq!(opportunity.legs[0].fee_cents, 174);
-    assert_eq!(opportunity.legs[1].fee_cents, 0);
-    assert_eq!(opportunity.net_cents, 326);
+    assert_eq!(opportunity.legs[1].fee_cents, 175);
+    assert_eq!(opportunity.net_cents, 151);
 
     // The identical prices produce nothing until a human has verified the pair.
     assert_eq!(
@@ -961,9 +968,9 @@ fn property_fees_never_fall_and_splitting_never_saves() {
             multiplier_denom: multiplier.1,
         };
         for price in 1..=99 {
-            let mut previous = fees.taker_fee(price, 0);
+            let mut previous = fees.taker_fee(ContractId(0), price, 0);
             for qty in 1..=600 {
-                let fee = fees.taker_fee(price, qty);
+                let fee = fees.taker_fee(ContractId(0), price, qty);
                 assert!(
                     fee >= previous,
                     "fee fell from {previous} to {fee} at p={price} q={qty}"
@@ -975,8 +982,9 @@ fn property_fees_never_fall_and_splitting_never_saves() {
                 let b = rng.range(1, 400);
                 // Subadditive: one order of a+b is never dearer than two orders.
                 assert!(
-                    fees.taker_fee(price, a + b)
-                        <= fees.taker_fee(price, a) + fees.taker_fee(price, b),
+                    fees.taker_fee(ContractId(0), price, a + b)
+                        <= fees.taker_fee(ContractId(0), price, a)
+                            + fees.taker_fee(ContractId(0), price, b),
                     "splitting beat batching at p={price} a={a} b={b}"
                 );
             }
@@ -989,7 +997,8 @@ fn property_fees_never_fall_and_splitting_never_saves() {
                 let bigger = qty * 4 + 20;
                 if exact(bigger) > exact(qty) + 1 {
                     assert!(
-                        fees.taker_fee(price, bigger) > fees.taker_fee(price, qty),
+                        fees.taker_fee(ContractId(0), price, bigger)
+                            > fees.taker_fee(ContractId(0), price, qty),
                         "fee flat across a full cent at p={price} {qty}->{bigger}"
                     );
                 }
