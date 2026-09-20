@@ -851,6 +851,87 @@ impl Registry {
     }
 
     /// Groups nobody has confirmed by hand.
+    /// Add discovered Polymarket markets as complement groups.
+    ///
+    /// Each market becomes one contract, interned under its yes token, and one
+    /// [`Relation::Complement`]: a binary market owes a dollar across its own
+    /// two outcomes. The no token is the same book mirrored and is deliberately
+    /// not interned — see [`crate::feed::polymarket`].
+    ///
+    /// Contract ids are positional, and every Kalshi member interns before any
+    /// Polymarket one. Extending an already-loaded registry preserves that:
+    /// Kalshi keeps the ids it had, and Polymarket takes the ones after. A book
+    /// store built with [`crate::book::BookStore::multi_venue`] over
+    /// `tickers(Kalshi)` then `tickers(Polymarket)` therefore agrees with this
+    /// registry contract for contract. Markets are interned in token order so
+    /// two runs over the same catalogue assign the same ids.
+    ///
+    /// Returns how many markets were added. One already present is skipped, so
+    /// this is safe to call twice.
+    pub fn extend_with_polymarket(
+        &mut self,
+        markets: &[crate::discovery::PolymarketMarket],
+    ) -> Result<usize> {
+        let mut ordered: Vec<_> = markets.iter().collect();
+        ordered.sort_by(|left, right| left.yes_token.cmp(&right.yes_token));
+
+        let mut added = 0usize;
+        for market in ordered {
+            if self
+                .contracts
+                .get(Venue::Polymarket, &market.yes_token)
+                .is_some()
+            {
+                continue;
+            }
+            // A market with no stated end has no resolution horizon, and the
+            // solver ranks on exactly that, so it is skipped rather than
+            // given an invented one.
+            let Some(close) = market.ends_at.as_deref() else {
+                continue;
+            };
+            let Ok(resolves_at) = DateTime::parse_from_rfc3339(close) else {
+                continue;
+            };
+            let resolves_at = resolves_at.with_timezone(&Utc);
+            let resolves_at_ms = u64::try_from(resolves_at.timestamp_millis()).unwrap_or(0);
+
+            let event_id = EventId(u32::try_from(self.events.len())?);
+            self.events.push(CanonicalEvent {
+                id: event_id,
+                key: market.yes_token.clone(),
+                description: market.question.clone(),
+                resolves_at,
+                resolution_source: "polymarket".to_owned(),
+                theme: None,
+                resolution_rules_hash: 0,
+            });
+            self.event_by_key.insert(market.yes_token.clone(), event_id);
+
+            let contract = self
+                .contracts
+                .intern(Venue::Polymarket, &market.yes_token)?;
+            self.tickers
+                .entry(Venue::Polymarket)
+                .or_default()
+                .push(market.yes_token.clone());
+            self.bindings.insert(
+                contract,
+                ContractBinding {
+                    contract_id: contract,
+                    venue: Venue::Polymarket,
+                    venue_ticker: market.yes_token.clone(),
+                    event: event_id,
+                    side: Side::Yes,
+                    verified: true,
+                },
+            );
+            self.push_group(Relation::Complement { contract }, resolves_at_ms, true)?;
+            added += 1;
+        }
+        Ok(added)
+    }
+
     pub fn inferred_count(&self) -> usize {
         self.groups.iter().filter(|g| g.inferred).count()
     }

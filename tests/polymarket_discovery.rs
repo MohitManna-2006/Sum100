@@ -156,3 +156,111 @@ fn interning_is_stable_for_polymarket_tokens() {
     // The same string on another venue is a different contract.
     assert_ne!(contracts.intern(Venue::Kalshi, "111").unwrap(), a);
 }
+
+// --------------------------------------------------- registry integration
+
+fn dated(token: &str, ends_at: Option<&str>) -> PolymarketMarket {
+    PolymarketMarket {
+        yes_token: token.to_owned(),
+        no_token: format!("{token}-no"),
+        question: format!("Will {token}?"),
+        tick_size: 0.01,
+        fee_type: Some("sports_fees_v3".into()),
+        fees_enabled: true,
+        ends_at: ends_at.map(str::to_owned),
+    }
+}
+
+/// The invariant the whole integration rests on: a book store built from the
+/// registry's own ticker lists agrees with it contract for contract. Ids are
+/// positional, so a store interned in a different order would point every book
+/// at the wrong market while still looking healthy.
+#[test]
+fn extending_keeps_registry_and_book_store_ids_aligned() {
+    use std::path::Path;
+    use std::sync::Arc;
+    use sum100::{book::BookStore, clock::ReplayClock, registry::Registry};
+
+    let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/registry.toml");
+    let mut registry = Registry::from_toml(&shipped).unwrap();
+    let kalshi_before = registry.tickers(Venue::Kalshi).to_vec();
+    let groups_before = registry.groups().len();
+
+    let markets = vec![
+        dated("300", Some("2026-12-31T00:00:00Z")),
+        dated("100", Some("2026-12-31T00:00:00Z")),
+        dated("200", Some("2026-12-31T00:00:00Z")),
+    ];
+    assert_eq!(registry.extend_with_polymarket(&markets).unwrap(), 3);
+
+    // Kalshi keeps every id it had; Polymarket takes the ones after.
+    assert_eq!(registry.tickers(Venue::Kalshi), kalshi_before.as_slice());
+    assert_eq!(
+        registry.tickers(Venue::Polymarket),
+        ["100".to_owned(), "200".to_owned(), "300".to_owned()],
+        "interned in token order, so two runs agree"
+    );
+    assert_eq!(registry.groups().len(), groups_before + 3);
+
+    let kalshi = registry.tickers(Venue::Kalshi).to_vec();
+    let poly = registry.tickers(Venue::Polymarket).to_vec();
+    let store = BookStore::multi_venue(
+        &[(Venue::Kalshi, &kalshi), (Venue::Polymarket, &poly)],
+        Arc::new(ReplayClock::new()),
+    )
+    .unwrap();
+
+    for binding in registry.bindings() {
+        let id = binding.contract_id;
+        let book = store.get(id).expect("every bound contract has a book");
+        assert_eq!(book.venue, binding.venue, "venue disagrees at {id:?}");
+        assert_eq!(
+            store.contracts().resolve(id),
+            registry.contracts().resolve(id),
+            "identifier disagrees at {id:?}"
+        );
+    }
+}
+
+/// Calling twice must not duplicate a market or shift any id.
+#[test]
+fn extending_twice_is_idempotent() {
+    use sum100::registry::Registry;
+
+    let mut registry = Registry::new([]).unwrap();
+    let markets = vec![dated("100", Some("2026-12-31T00:00:00Z"))];
+    assert_eq!(registry.extend_with_polymarket(&markets).unwrap(), 1);
+    assert_eq!(registry.extend_with_polymarket(&markets).unwrap(), 0);
+    assert_eq!(registry.tickers(Venue::Polymarket).len(), 1);
+    assert_eq!(registry.groups().len(), 1);
+}
+
+/// A market with no stated end has no resolution horizon, and the solver ranks
+/// on exactly that. Skipped rather than given an invented date.
+#[test]
+fn a_market_without_an_end_date_is_skipped() {
+    use sum100::registry::Registry;
+
+    let mut registry = Registry::new([]).unwrap();
+    let markets = vec![dated("100", None), dated("200", Some("not-a-date"))];
+    assert_eq!(registry.extend_with_polymarket(&markets).unwrap(), 0);
+    assert!(registry.tickers(Venue::Polymarket).is_empty());
+}
+
+/// Each market becomes one complement over its own contract, and the group is
+/// marked inferred so live orders stay blocked without an explicit opt-in.
+#[test]
+fn each_market_becomes_one_inferred_complement() {
+    use sum100::registry::{Registry, Relation};
+
+    let mut registry = Registry::new([]).unwrap();
+    registry
+        .extend_with_polymarket(&[dated("100", Some("2026-12-31T00:00:00Z"))])
+        .unwrap();
+
+    let contract = registry.contracts().get(Venue::Polymarket, "100").unwrap();
+    let group = &registry.groups()[0];
+    assert_eq!(group.relation, Relation::Complement { contract });
+    assert!(group.inferred, "discovered groups need a human before live");
+    assert_eq!(registry.groups_for(contract), &[group.id]);
+}
