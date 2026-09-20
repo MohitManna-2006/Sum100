@@ -234,7 +234,7 @@ impl HealthMonitor {
     /// when data does.
     pub fn apply_feed_event(&mut self, event: &FeedEvent, venue: Venue, now_ms: u64) {
         match event {
-            FeedEvent::Snapshot { .. } | FeedEvent::Delta { .. } => {
+            FeedEvent::Snapshot { .. } | FeedEvent::Delta { .. } | FeedEvent::LevelSet { .. } => {
                 self.venue_mut(venue).update_on_message(now_ms);
             }
             FeedEvent::Disconnected { .. } => {

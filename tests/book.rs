@@ -3,7 +3,7 @@ use sum100::{
     book::{Applied, BookStore},
     clock::{Clock, ReplayClock},
     feed::{FeedEvent, kalshi::Parser},
-    types::{BookState, ContractId, Level, Side, Venue},
+    types::{BookState, ContractId, Level, Side, TokenSide, Venue},
 };
 
 fn fixture(name: &str) -> Vec<String> {
@@ -525,4 +525,164 @@ fn an_event_routes_to_the_venue_that_owns_its_contract() {
     // A contract this store does not hold belongs to no venue here.
     assert_eq!(store.venue_of(&delta(ContractId(99), 1)), None);
     assert_eq!(store.venues(), vec![Venue::Kalshi, Venue::Polymarket]);
+}
+
+/// A venue that restates a level rather than adjusting it.
+///
+/// Applying an absolute size through the delta path would add it to what is
+/// already resting and double the level on its first update, which is why this
+/// is a separate operation rather than a flag on the other one.
+fn polymarket_store() -> BookStore {
+    let tokens = vec!["0xtoken".to_owned()];
+    BookStore::multi_venue(&[(Venue::Polymarket, &tokens)], clock()).unwrap()
+}
+
+#[test]
+fn a_level_set_replaces_the_resting_size_rather_than_adding_to_it() {
+    let mut store = polymarket_store();
+    let id = ContractId(0);
+    assert_eq!(
+        store.apply(&snapshot_with(id, 1, &[(57, 1_000)], &[])),
+        Applied::Snapshot(id)
+    );
+    assert_eq!(store.get(id).unwrap().yes_size_at(57), Some(1_000));
+
+    // Absolute: the level becomes 2_284_194, not 1_000 + 2_284_194.
+    assert_eq!(
+        store.apply(&FeedEvent::LevelSet {
+            contract: id,
+            side: TokenSide::Bid,
+            price: 57,
+            size: 2_284_194,
+            venue_ts_ms: 1_700,
+        }),
+        Applied::LevelSet(id)
+    );
+    assert_eq!(store.get(id).unwrap().yes_size_at(57), Some(2_284_194));
+    assert_eq!(store.metrics.levels_replaced, 1);
+
+    // And a level can be emptied, which a signed delta would have to guess at.
+    store.apply(&FeedEvent::LevelSet {
+        contract: id,
+        side: TokenSide::Bid,
+        price: 57,
+        size: 0,
+        venue_ts_ms: 1_800,
+    });
+    assert_eq!(store.get(id).unwrap().yes_size_at(57), Some(0));
+}
+
+#[test]
+fn an_ask_level_set_is_stored_as_a_bid_on_the_complement() {
+    let mut store = polymarket_store();
+    let id = ContractId(0);
+    store.apply(&snapshot_with(id, 1, &[(55, 10)], &[]));
+
+    // Offering this outcome at 57 is bidding 43 for the other one.
+    store.apply(&FeedEvent::LevelSet {
+        contract: id,
+        side: TokenSide::Ask,
+        price: 57,
+        size: 900,
+        venue_ts_ms: 1_700,
+    });
+    let book = store.get(id).unwrap();
+    assert_eq!(book.no_size_at(43), Some(900));
+    assert_eq!(book.yes_size_at(57), Some(0), "the yes ladder is untouched");
+    // Read back through the derived ask ladder, it is the price the venue sent.
+    assert_eq!(book.best_ask().map(|l| l.price), Some(57));
+}
+
+#[test]
+fn a_level_set_is_refused_until_a_snapshot_has_landed() {
+    let mut store = polymarket_store();
+    let id = ContractId(0);
+    // No snapshot yet: an absolute level would describe a book with one price
+    // in it rather than the real one.
+    assert_eq!(
+        store.apply(&FeedEvent::LevelSet {
+            contract: id,
+            side: TokenSide::Bid,
+            price: 57,
+            size: 100,
+            venue_ts_ms: 1_700,
+        }),
+        Applied::Skipped
+    );
+    assert_eq!(store.metrics.levels_replaced, 0);
+    assert_eq!(store.metrics.deltas_skipped_not_live, 1);
+}
+
+#[test]
+fn a_level_set_out_of_range_or_negative_is_skipped_not_applied() {
+    let mut store = polymarket_store();
+    let id = ContractId(0);
+    store.apply(&snapshot_with(id, 1, &[(55, 10)], &[]));
+
+    for (side, price, size) in [
+        (TokenSide::Bid, 101, 5),
+        (TokenSide::Bid, -1, 5),
+        (TokenSide::Bid, 55, -5),
+    ] {
+        assert_eq!(
+            store.apply(&FeedEvent::LevelSet {
+                contract: id,
+                side,
+                price,
+                size,
+                venue_ts_ms: 1_700,
+            }),
+            Applied::Skipped,
+            "price {price} size {size}"
+        );
+    }
+    assert_eq!(store.metrics.levels_replaced, 0);
+    assert_eq!(store.get(id).unwrap().yes_size_at(55), Some(10));
+}
+
+/// A level update carries no sequence number, so it must neither advance nor
+/// disturb the expectation a snapshot set.
+#[test]
+fn a_level_set_leaves_sequence_continuity_alone() {
+    let mut store = polymarket_store();
+    let id = ContractId(0);
+    store.apply(&snapshot_with(id, 7, &[(55, 10)], &[]));
+    assert_eq!(store.expected_seq(Venue::Polymarket), Some(8));
+
+    store.apply(&FeedEvent::LevelSet {
+        contract: id,
+        side: TokenSide::Bid,
+        price: 55,
+        size: 99,
+        venue_ts_ms: 1_700,
+    });
+    assert_eq!(store.expected_seq(Venue::Polymarket), Some(8));
+    assert_eq!(store.get(id).unwrap().state, BookState::Live);
+}
+
+fn snapshot_with(
+    contract: ContractId,
+    seq: u64,
+    yes: &[(i64, i64)],
+    no: &[(i64, i64)],
+) -> FeedEvent {
+    FeedEvent::Snapshot {
+        contract,
+        yes: yes
+            .iter()
+            .map(|(price, size)| Level {
+                price: *price,
+                size: *size,
+            })
+            .collect(),
+        no: no
+            .iter()
+            .map(|(price, size)| Level {
+                price: *price,
+                size: *size,
+            })
+            .collect(),
+        seq,
+        venue_ts_ms: None,
+    }
 }

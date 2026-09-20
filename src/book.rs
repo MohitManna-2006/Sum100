@@ -28,6 +28,8 @@ use std::sync::Arc;
 pub enum Applied {
     Snapshot(ContractId),
     Delta(ContractId),
+    /// One level restated outright, from a venue that sends absolute sizes.
+    LevelSet(ContractId),
     /// Delta arrived while the book was not [`BookState::Live`].
     Skipped,
     /// Subscription sequence discontinuity; driver must request resync.
@@ -44,6 +46,9 @@ pub enum Applied {
 pub struct BookMetrics {
     pub snapshots_applied: u64,
     pub deltas_applied: u64,
+    /// Levels restated outright, counted apart from deltas because they arrive
+    /// from a different venue and carry no sequence continuity.
+    pub levels_replaced: u64,
     pub deltas_skipped_not_live: u64,
     pub sequence_gaps: u64,
     pub resync_requests: u64,
@@ -127,6 +132,7 @@ impl BookStore {
             FeedEvent::Disconnected { venue } => Some(*venue),
             FeedEvent::Snapshot { contract, .. }
             | FeedEvent::Delta { contract, .. }
+            | FeedEvent::LevelSet { contract, .. }
             | FeedEvent::Resubscribed { contract } => self.get(*contract).map(|book| book.venue),
         }
     }
@@ -172,7 +178,9 @@ impl BookStore {
     pub fn apply_and_mark(&mut self, event: &FeedEvent) -> (Applied, Vec<ContractId>) {
         let applied = self.apply(event);
         let dirty = match applied {
-            Applied::Snapshot(contract) | Applied::Delta(contract) => vec![contract],
+            Applied::Snapshot(contract)
+            | Applied::Delta(contract)
+            | Applied::LevelSet(contract) => vec![contract],
             Applied::Skipped
             | Applied::Gap { .. }
             | Applied::UnknownContract
@@ -205,6 +213,13 @@ impl BookStore {
                 *seq,
                 self.clock.now_ms(),
             ),
+            FeedEvent::LevelSet {
+                contract,
+                side,
+                price,
+                size,
+                venue_ts_ms: _,
+            } => self.apply_level_set(*contract, *side, *price, *size, self.clock.now_ms()),
             FeedEvent::Disconnected { venue } => {
                 self.invalidate_venue(*venue);
                 Applied::Invalidated
@@ -315,6 +330,44 @@ impl BookStore {
                 Applied::Skipped
             }
         }
+    }
+
+    /// Restate one level of a live book.
+    ///
+    /// No sequence bookkeeping: the venues that send these do not number their
+    /// streams, so there is no expectation to advance and nothing a gap could
+    /// be measured against. A book that is not yet `Live` still refuses the
+    /// update, because an absolute level on top of no snapshot describes a book
+    /// with one price in it rather than the real one.
+    fn apply_level_set(
+        &mut self,
+        contract: ContractId,
+        side: crate::types::TokenSide,
+        price: crate::types::Cents,
+        size: i64,
+        ts_ms: u64,
+    ) -> Applied {
+        let Some(book) = self.books.get_mut(contract.0 as usize) else {
+            return Applied::UnknownContract;
+        };
+        if book.contract_id != contract {
+            return Applied::UnknownContract;
+        }
+        if book.state != BookState::Live {
+            self.metrics.deltas_skipped_not_live =
+                self.metrics.deltas_skipped_not_live.saturating_add(1);
+            return Applied::Skipped;
+        }
+        if let Err(error) = book.replace_level(side, price, size, ts_ms) {
+            tracing::warn!(%error, ?contract, price, "level update rejected");
+            return Applied::Skipped;
+        }
+        self.metrics.levels_replaced = self.metrics.levels_replaced.saturating_add(1);
+        if book.is_crossed() {
+            self.metrics.crossed_books_observed =
+                self.metrics.crossed_books_observed.saturating_add(1);
+        }
+        Applied::LevelSet(contract)
     }
 
     /// Demote this venue's live books, leaving every other venue untouched.

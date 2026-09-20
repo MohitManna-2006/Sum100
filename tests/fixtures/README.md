@@ -1,7 +1,8 @@
-# Kalshi live fixtures
+# Live venue fixtures
 
-All venue payload files here are captured production bytes for
-`KXBTCD-26SEP1417-T76999.99`. They are not JSON re-serializations. Each record
+Kalshi fixtures are captured production bytes for
+`KXBTCD-26SEP1417-T76999.99`; the Polymarket fixture is documented in its own
+section below. They are not JSON re-serializations. Each record
 contains the raw WebSocket text with its trailing LF removed and exactly one
 file delimiter LF added. Original key order, decimal strings, and whitespace
 are preserved. No payload was synthesized.
@@ -85,6 +86,46 @@ Evidence and commands: [docs/phase-3-summary.md](../../docs/phase-3-summary.md).
 | File | SHA-256 |
 | --- | --- |
 | phase3-d-one-sided-snapshots.ndjson.gz | `0501b38367cd67c7d0d22f02569b3f65028c8799f8312b7e5a73d5edaa2fee7c` |
+
+## Phase 7a Polymarket market channel
+
+- `polymarket-0.01-tick-sample.ndjson.gz`: 60-second capture of the CLOB
+  market channel at `wss://ws-subscriptions-clob.polymarket.com/ws/market`,
+  started September 20, 2026 at 15:06:01 UTC. The market is
+  `0xc5a91043c51452c8db48b2420953e906237025c4dd0f7609f0ea1b56f1752c51`
+  ("Panthers vs. Falcons", `orderPriceMinTickSize` 0.01, `feeType` `zero_fees`),
+  subscribed on both `clobTokenIds`: yes `61682588…757063880`, no
+  `77581328…955009642`. 80 envelopes: 2 control (`session_started`,
+  `disconnected`), and 78 text — one `book` message carrying a two-element
+  array (one snapshot per token, 32 bids and 27 asks on the yes token),
+  72 `price_change` messages carrying 144 level updates, and 5 bare `PONG`
+  replies to the client's 10-second `PING`. Raw text is stored verbatim; no
+  payload was synthesized or re-serialized. Public market data only — the
+  market channel needs no credentials.
+
+What this capture establishes, against which the parser is written:
+
+- `price_change` `size` is the **new absolute size at that price level**, not a
+  signed delta. Of 122 level updates that had a prior known size, 122 changed
+  it and none repeated it, and no size was ever negative — a delta encoding
+  would have produced negatives as liquidity left the book. The yes book's ask
+  at `0.57` was `2284294.45` in the snapshot and `2284194.45` in the following
+  `price_change`, exactly 100 fewer.
+- The two tokens are exact complements, reported twice. All 72 `price_change`
+  messages carried paired entries whose prices summed to exactly `1.00` with
+  identical sizes, so a yes ask at `p` and a no bid at `1 - p` are one resting
+  order. That is the same model `Book` already uses for Kalshi, so a 0.01-tick
+  Polymarket market needs no change to the book representation.
+- Messages arrive as a JSON **array** for `book` and a JSON object for
+  `price_change`; the discriminator is `event_type`, the token is `asset_id`,
+  and `market` is the condition id. A `price_change` nests its updates under
+  `price_changes`.
+- The server answers the client's `PING` with a bare four-byte `PONG` text
+  frame, which is not JSON and must not count as a parse error.
+
+| File | SHA-256 |
+| --- | --- |
+| polymarket-0.01-tick-sample.ndjson.gz | `42f8068b35a5559bdb71f6f51d85c45e07e99099b56087af769c51fd6e57f7ea` |
 
 The corpus files stay on disk so later phases can reuse them. Test-only malformed
 payloads are deliberate mutations, clearly separated from captured fixtures.

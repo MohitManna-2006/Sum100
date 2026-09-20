@@ -41,6 +41,20 @@ pub struct Level {
     pub size: i64,
 }
 
+/// Which of one contract's two ladders a quote sits on.
+///
+/// Deliberately not [`Side`]: that names an *outcome*, while this names a side
+/// of the order book for a contract whose outcome is already fixed. A venue
+/// that quotes one token with its own bids and asks needs this distinction,
+/// because an ask on the yes outcome is a bid on the no outcome and writing it
+/// to the yes ladder would put resting liquidity on the wrong half of the book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenSide {
+    Bid,
+    Ask,
+}
+
 /// Whether a book is trustworthy for solver evaluation.
 ///
 /// The solver refuses any group containing a book that is not [`Live`]. A
@@ -144,6 +158,39 @@ impl Book {
         self.seq = seq;
         self.updated_at_ms = ts_ms;
         Ok(clamped)
+    }
+
+    /// Replace the resting size at one price outright.
+    ///
+    /// The counterpart to [`Book::apply_delta`] for a venue that restates a
+    /// level rather than adjusting it. Adding an absolute size as though it
+    /// were a change would double the level on its first update, so the two
+    /// must stay separate operations rather than one with a flag.
+    ///
+    /// An ask is stored as a bid on the complement, which is the same identity
+    /// the yes and no ladders already encode: offering this outcome at `p` is
+    /// bidding `100 - p` for the other one. That is what lets a venue quoting a
+    /// single token with two ladders share this representation.
+    pub fn replace_level(
+        &mut self,
+        side: TokenSide,
+        price: Cents,
+        size: i64,
+        ts_ms: u64,
+    ) -> Result<(), BookApplyError> {
+        if size < 0 {
+            return Err(BookApplyError::NegativeSnapshotSize(size));
+        }
+        // Validated on the price the venue sent, so a rejection names that
+        // price rather than the complement this happens to store it at.
+        let quoted = Self::price_index(price)?;
+        let (idx, slot) = match side {
+            TokenSide::Bid => (quoted, &mut self.yes),
+            TokenSide::Ask => (100 - quoted, &mut self.no),
+        };
+        slot[idx] = size;
+        self.updated_at_ms = ts_ms;
+        Ok(())
     }
 
     /// Yes bids, highest price first, skipping empty levels.

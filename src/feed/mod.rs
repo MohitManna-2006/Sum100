@@ -1,9 +1,10 @@
 pub mod kalshi;
+pub mod polymarket;
 pub mod replay;
 pub mod rest;
 
 use crate::metrics::Metrics;
-use crate::types::{Cents, ContractId, Level, Side, Venue};
+use crate::types::{Cents, ContractId, Level, Side, TokenSide, Venue};
 use std::{future::Future, pin::Pin};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,22 @@ pub enum FeedEvent {
         size_delta: i64,
         seq: u64,
         /// The venue's own timestamp; required on Kalshi deltas.
+        venue_ts_ms: u64,
+    },
+    /// One price level restated outright, for a venue that publishes the size
+    /// now resting at a price rather than the change to it.
+    ///
+    /// Carries no sequence number because the venues that send this do not
+    /// number their streams. A counter minted here on receipt could never
+    /// disagree with itself, so it would detect no gap it was not itself
+    /// inventing; continuity for such a feed has to come from re-requesting the
+    /// book, not from a number this process made up.
+    LevelSet {
+        contract: ContractId,
+        side: TokenSide,
+        price: Cents,
+        /// The size now resting at this price, not a change to it.
+        size: i64,
         venue_ts_ms: u64,
     },
     Disconnected {
