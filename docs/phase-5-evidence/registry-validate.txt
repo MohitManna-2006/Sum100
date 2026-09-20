@@ -1,0 +1,7 @@
+$ sum100 registry validate
+
+events     1
+  btc-2026-09-14-17        resolves 2026-09-14T21:00:00+00:00  Bitcoin price at 2026-09-14 17:00 ET, Kalshi hourly strike ladder
+groups     81 (complement 80, exhaustive 0, monotone 1, implies 0, equivalent 0)
+contracts  kalshi 80, polymarket 0
+registry OK

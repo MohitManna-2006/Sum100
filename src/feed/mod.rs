@@ -39,4 +39,14 @@ pub enum FeedEvent {
 /// Object-safe async boundary without adding an async-trait dependency.
 pub trait Feed: Send {
     fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>>;
+
+    /// Ask the venue for a fresh snapshot after a sequence gap.
+    ///
+    /// The default does nothing, which is right for a recorded stream: a replay
+    /// already contains whatever resync the live run performed, and inventing a
+    /// second one would desynchronize it from the recording. A live feed
+    /// overrides this to drop its socket and let the reconnect path deliver the
+    /// snapshot. Having it on the trait means the engine loop handles a gap the
+    /// same way for every feed instead of knowing which one it holds.
+    fn request_resync(&self) {}
 }

@@ -1,10 +1,13 @@
 # Sum100 example configuration.
 #
-# Not parsed by any code yet; this documents the intended shape so the loader in
-# a later phase has a target. Copy to config/local.toml to customize.
+# Read by `sum100 scan` and `sum100 registry validate` via --config. Copy to
+# config/local.toml to customize; unknown keys are rejected at startup, so a
+# typo fails loudly instead of silently leaving a default in place.
 
 [engine]
 # Quotes older than this are treated as stale and never produce a signal.
+# The gate is all-or-nothing across a group: one stale member skips the whole
+# thing, so a wide ladder over illiquid wings is rarely evaluable at 500 ms.
 max_book_age_ms = 500
 # Minimum net profit, in integer cents, for a candidate to be reported.
 min_net_edge_cents = 1
@@ -15,10 +18,19 @@ max_position_size = 500
 
 [venues.kalshi]
 enabled = true
+# Quantized to thousandths on the way in so fee arithmetic stays integral.
 fee_multiplier = 1.0
+cache_dir = ".cache/kalshi"
 
 [venues.polymarket]
+# No feed and no fee model yet; phase 7. Registry members on this venue still
+# load, so a cross-venue group is visible and skipped for a stated reason.
 enabled = false
+metadata_url = "https://clob.polymarket.com"
+cache_dir = ".cache/polymarket"
+
+[registry]
+path = "config/registry.toml"
 
 [recorder]
 enabled = true

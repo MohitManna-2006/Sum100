@@ -1,0 +1,18 @@
+$ sum100 scan --replay data/phase3-d/production/kalshi-2026-09-14.ndjson.gz
+# The phase 3 session D capture: the reconnect storm, recorded because it was broken.
+
+
+events received      38659
+books updated        20352
+groups dirtied       40704
+groups evaluated     40704
+candidates found     0
+signals accepted     0
+sequence gaps        0
+states broadcast     38659 (lagged 0)
+books                0 live, 80 resyncing, 0 uninitialized
+  snapshots 18160, deltas 2192, skipped 0, crossed seen 0
+
+rejections           17967
+  not live             17933
+  stale                34

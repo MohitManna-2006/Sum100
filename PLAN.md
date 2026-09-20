@@ -3,11 +3,12 @@
 Planning horizon: 14 weeks from start, 16 if the coherence engine is built.
 The estimation path is specified in [docs/COHERENCE.md](docs/COHERENCE.md).
 
-## Current checkpoint — September 19, 2026
+## Current checkpoint — September 20, 2026
 
 The imported plan is a roadmap, not a claim that its future components exist.
-Phase 1 stage 2, **phase 2 (book store)**, phase 3 (replay), and **phase 4
-(solver fast paths and costing)** are implemented. Later session
+Phase 1 stage 2, **phase 2 (book store)**, phase 3 (replay), phase 4 (solver
+fast paths and costing), and **phase 5 (registry loading and the engine task)**
+are implemented. Later session
 decisions supersede the original `new_size`, bid/ask normalization,
 unauthenticated public WebSocket, and parsed-event recorder assumptions.
 
@@ -44,11 +45,19 @@ unauthenticated public WebSocket, and parsed-event recorder assumptions.
   the written spec. The general LP fallback stays future work. The phase's own
   live deliverable — a replayed trading day's candidate log with a rejection
   breakdown and five hand-checked rejections — needs phase 5 and remains open.
+- Phase 5: `config.rs` (TOML config, unknown keys rejected), registry loading
+  with events, bindings, and offline validation, `engine.rs` (dirty marking,
+  solve, broadcast), and the `scan` and `registry validate` subcommands.
+  `config/registry.toml` ships the 80-strike BTC graph from the phase 3 capture.
+  Evidence in docs/phase-5-summary.md. Both recorded sessions replay coherent:
+  zero candidates, which is the predicted result. `scan --live` is wired but has
+  not been pointed at a live socket.
 - Coherence engine: design accepted in [docs/COHERENCE.md](docs/COHERENCE.md);
   implementation is phases 9 and 10, not started.
-- Pending: hour-long endurance session; thirty-minute UI side-by-side; registry
-  loading and config parsing; solver CLI path and the live candidate log;
-  tick-to-signal latency; execution; second venue; coherence engine; UI.
+- Pending: hour-long endurance session; thirty-minute UI side-by-side; a live
+  `scan` run and a real candidate log; per-group freshness policy (a wide ladder
+  is rarely evaluable at 500 ms); tick-to-signal latency; HTTP API; execution;
+  second venue; coherence engine; UI.
 
 Use [README.md](README.md) for working commands and setup. The supplied original
 README is preserved verbatim as [README.reference.md](README.reference.md);

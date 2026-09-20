@@ -1,0 +1,428 @@
+# Sum100 constraint registry.
+#
+# What relates to what, and when it settles. Loading is offline and
+# deterministic: tickers intern to contract ids in the order they appear here,
+# and the parser and book store must be built from the same list or every id
+# shifts. Ticker existence is checked separately, against live venue metadata,
+# by `sum100 registry validate`.
+#
+# This file describes the capture in data/phase3-d/, so
+# `make scan-replay` has something real to solve against.
+
+[[event]]
+id = "btc-2026-09-14-17"
+description = "Bitcoin price at 2026-09-14 17:00 ET, Kalshi hourly strike ladder"
+resolves_at = "2026-09-14T21:00:00Z"
+resolution_source = "Kalshi BTC hourly settlement"
+resolution_rules_hash = 0
+
+# Each strike is its own binary market, so yes and no must sum to a dollar on
+# every one of them. A crossed book here is the complement arbitrage.
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T66499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T66749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T66999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85249.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85499.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85749.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85999.99" }]
+
+[[event.group]]
+type = "complement"
+members = [{ venue = "kalshi", ticker = "KXBTCD-26SEP1417-T86249.99" }]
+
+# "BTC above X" gets less likely as X rises, so this ladder is written
+# weakest claim first and its prices must be non-increasing down the list.
+# The loader rejects it if the strikes are not ascending.
+[[event.group]]
+type = "monotone"
+members = [
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T66499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T66749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T66999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T67999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T68999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T69999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T70999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T71999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T72999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T73999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T74999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T75999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T76999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T77999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T78999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T79999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T80999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T81999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T82999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T83999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T84999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85249.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85499.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85749.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T85999.99" },
+  { venue = "kalshi", ticker = "KXBTCD-26SEP1417-T86249.99" },
+]

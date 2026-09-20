@@ -28,3 +28,4 @@ target
 data/
 config/local.toml
 .DS_Store
+.cache/

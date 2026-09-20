@@ -1,5 +1,7 @@
 pub mod book;
 pub mod clock;
+pub mod config;
+pub mod engine;
 pub mod feed;
 pub mod fees;
 pub mod metrics;

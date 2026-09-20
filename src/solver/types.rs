@@ -20,8 +20,11 @@ pub const MIN_HORIZON_DAYS: f64 = 1.0 / 24.0;
 
 /// The engine's `[engine]` configuration block, in memory.
 ///
-/// Mirrors `config/example.toml`. Phase 5 owns parsing the file into this.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Mirrors the `[engine]` block of `config/example.toml`, which
+/// [`crate::config::Config`] parses into this. Every field carries a default, so
+/// a config that omits the block, or any key in it, still starts.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct SolverConfig {
     /// Quotes older than this are stale and never produce a signal.
     pub max_book_age_ms: u64,
@@ -189,7 +192,7 @@ impl std::fmt::Display for RejectReason {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SolverMetrics {
     pub groups_evaluated: u64,
     pub candidates_found: u64,

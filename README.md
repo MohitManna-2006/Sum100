@@ -6,8 +6,8 @@ Fees kill most of them. That's the interesting part.
 
 Paper only. There is no order-placement code path and there won't be one.
 
-**Runs today:** authenticated Kalshi feed and raw recorder, book store with subscription-scoped gap detection and resync, byte-exact offline replay, and the solver — four closed-form constraint checks, depth- and fee-aware costing, ranked by annualized return on locked capital.
-**Doesn't yet:** registry loading, paper executor, Polymarket, the coherence engine ([docs/COHERENCE.md](docs/COHERENCE.md)), UI.
+**Runs today:** authenticated Kalshi feed and raw recorder, book store with subscription-scoped gap detection and resync, byte-exact offline replay, the solver — four closed-form constraint checks, depth- and fee-aware costing, ranked by annualized return — and the engine task that loads a constraint graph from TOML, marks groups dirty, solves them, and publishes state.
+**Doesn't yet:** paper executor, Polymarket, an HTTP API, the coherence engine ([docs/COHERENCE.md](docs/COHERENCE.md)), UI.
 
 Design is [ARCHITECTURE.md](ARCHITECTURE.md), schedule is [PLAN.md](PLAN.md). This file is the only source for what actually runs. [README.reference.md](README.reference.md) is the original import under the old name Parity, kept verbatim, historical only.
 
@@ -29,6 +29,10 @@ export KALSHI_PRIVATE_KEY_PATH="$HOME/.config/kalshi/key.pem"
 Demo is the default everywhere. Production is `--prod`, and it logs a warning when you pick it. Discovery is `GET /events` and `GET /markets`; nothing in this binary can place, cancel, or transfer.
 
 ```sh
+make registry-validate                                        # load the graph, no network
+make scan-replay FILE=data/phase2-1-e/production/kalshi-2026-09-14.ndjson.gz
+make scan-prod SECONDS=70                                     # live; tickers come from the registry
+
 make record TICKERS=YOUR-DEMO-TICKER                          # record demo
 make dump-prod TICKERS=KXBTCD-26SEP1417-T76999.99 SECONDS=70  # live bid/ask table
 make dump-digest TICKERS=KXBTCD-26SEP1417-T76999.99 SECONDS=180
@@ -50,7 +54,9 @@ Feed → book store → solver. One direction, no calls backwards. That's what m
 
 A crossed book (`yes bid + no bid > 100`) stays `Live` and gets counted. That's the complement arbitrage, sitting in plain sight.
 
-**Registry** (`src/registry.rs`). Constraint groups plus the contract → group reverse index, built once at load so dirty marking is a hash lookup instead of a scan. Relations are `Complement`, `Exhaustive`, `Monotone` (a ladder, weakest claim first), `Implies` (its two-rung case), and `Equivalent` (cross-venue, gated on a `verified` flag a human sets). `Relation::resolution_states` enumerates every resolution a relation permits, and that enumeration — not a hardcoded "a set pays a dollar" — is what every signal is priced against. Reading `config/registry.toml` is phase 5.
+**Registry** (`src/registry.rs`). Constraint groups plus the contract → group reverse index, built once at load so dirty marking is a hash lookup instead of a scan. Relations are `Complement`, `Exhaustive`, `Monotone` (a ladder, weakest claim first), `Implies` (its two-rung case), and `Equivalent` (cross-venue, gated on a `verified` flag a human sets). `Relation::resolution_states` enumerates every resolution a relation permits, and that enumeration — not a hardcoded "a set pays a dollar" — is what every signal is priced against. Loading is in the next section.
+
+**Engine** (`src/engine.rs`). The only place the pieces meet. Apply the event, take the dirty contracts back from the book store as an ordered `Vec`, hand them to the solver, hand what it returns to the sink, publish state. Single owner, no locks: the work per update is microseconds and splitting it across tasks would add channel hops to parallelize nothing. A sequence gap asks the feed to resync through `Feed::request_resync` and evaluates nothing until a snapshot lands — a replay's default is to do nothing, since the recording already contains whatever resync the live run performed. State publishes to a `tokio::broadcast` and is only built when something is subscribed, so a verification replay allocates no snapshots. The sink is a trait; today it logs signals, and phase 6 drops the paper executor in behind it.
 
 ## Solver
 
@@ -88,6 +94,44 @@ case            leg price     leg cost      leg fee      running
 
 Two cents of gross edge against $3.58 of fees. Reproduce with `cargo test --test solver -- --exact fed_example_rejection_table --nocapture`; the captured run is in [docs/phase-4-evidence/](docs/phase-4-evidence/). The general LP fallback for groups no fast path expresses is future work, sketched in `src/solver/mod.rs`. Phase 4 detail, including four places the implementation deliberately departs from its written spec, is in [docs/phase-4-summary.md](docs/phase-4-summary.md).
 
+## Registry
+
+The constraint graph is data, not code. Adding coverage is a pull request against `config/registry.toml`.
+
+```toml
+[[event]]
+id = "fed-2026-09"
+description = "FOMC rate decision, September 2026"
+resolves_at = "2026-09-17T18:00:00Z"   # RFC3339; this is what ranking measures against
+resolution_source = "FOMC statement"
+
+[[event.group]]
+type = "exhaustive"                     # exactly one member pays $1
+members = [
+  { venue = "kalshi", ticker = "KXFED-26SEP-C50" },
+  { venue = "kalshi", ticker = "KXFED-26SEP-C25" },
+  { venue = "kalshi", ticker = "KXFED-26SEP-NC" },
+]
+
+[[event.group]]
+type = "equivalent"                     # cross-venue; verified is required here
+verified = false
+members = [
+  { venue = "kalshi", ticker = "KXFED-26SEP-C25" },
+  { venue = "polymarket", token = "0x..." },
+]
+```
+
+Group types are `complement` (one member), `exhaustive`, `monotone` (a ladder, written weakest claim first), `implies` (antecedent first), and `equivalent`. Kalshi members take `ticker`, Polymarket takes `token`, never both. `verified` is required on `equivalent` and rejected everywhere else, so a cross-venue pair states its status rather than inheriting a default.
+
+**To add an event:** append an `[[event]]` block, list its groups, run `make registry-validate` to check the shape offline, then `make registry-validate-prod` to confirm every ticker is a market Kalshi actually lists. Restart and it is live. No code changes.
+
+Loading touches no network. It parses, interns tickers to contract ids, builds the index, and enforces everything checkable from the file: a ladder must ascend by strike, a contract cannot sit in two exhaustive sets or under two events, an unknown venue or group type is fatal. Confirming those tickers exist is `registry validate --live`, which fetches market metadata and caches it under `cache_dir`. The split is deliberate — replay has to run with no credentials and no network, and it has to resolve the same tickers to the same ids the live run did, so a loader that phoned a venue would break both.
+
+That last point is the sharp edge. `ContractId` is positional, assigned in interning order, and the parser and book store intern from a ticker list too. All three must see the same list in the same order or every id silently shifts, which is why `Registry::tickers(venue)` exists and why `scan` builds everything from it. A test pins it.
+
+`config/example.toml` holds the `[engine]` thresholds, per-venue settings, and the registry path. Unknown keys are rejected: a misspelled `max_positon_size` fails at startup instead of quietly leaving a default in place.
+
 ## Recording and replay
 
 Every inbound frame is written **before parsing** to `OUT/{demo,production}/kalshi-YYYY-MM-DD.ndjson.gz`, one file per venue per UTC receipt day, one recorder per directory behind an OS lock. Each line is an envelope — receipt milliseconds, monotonic sequence, kind, raw — and for text the raw payload is a JSON string that decodes back to the original bytes under a single-trailing-LF rule. Whitespace, field order, Unicode escapes, and malformed JSON all survive, because the recorder never parses venue JSON. Feed lifecycle events ride the same stream as `control` envelopes so replay reproduces the live resync path. Files are concatenated gzip members flushed every two seconds: read them with `MultiGzDecoder`, Python `gzip`, or `gzip -dc`. Raw files under `data/` are gitignored; curated fixtures are tracked. Byte-level format, restart, and crash-recovery rules are in [ARCHITECTURE.md](ARCHITECTURE.md) §4.7.
@@ -104,6 +148,8 @@ Both `dump` and `replay` print a digest: SHA-256 per contract over its canonical
 ## Tests
 
 `make check` is fmt, clippy `-D warnings`, and the suite. Parser and book-store tests replay the full stage 2 capture to a pinned final bid/ask and cover complement conversion, gap and resync transitions, floor drift, and crossed books. Recorder tests assert byte-identical read-back, member concatenation, and sequence continuation across restarts. Signing tests verify RSA-PSS against a throwaway key.
+
+Engine tests cover registry loading, that the registry, parser, and book store agree on every contract id, dirty marking (including that a gap or disconnect marks nothing, since the solver would only reject it), the loop finding both a crossed book and a ladder inversion in one update, gap-driven resync, and replay determinism — the same capture twice produces byte-identical signal logs and byte-identical serialized state broadcasts.
 
 Solver tests cover all four paths, the Fed example both ways, multi-level depth walking with size capping, the freshness gate, ranking, and the real stage 2 book (coherent, correctly silent). Four property tests run on a seeded splitmix64 so a failure replays exactly:
 

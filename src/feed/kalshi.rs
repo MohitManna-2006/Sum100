@@ -302,6 +302,10 @@ impl Feed for KalshiFeed {
     fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>> {
         Box::pin(self.events.recv())
     }
+
+    fn request_resync(&self) {
+        KalshiFeed::request_resync(self);
+    }
 }
 impl KalshiFeed {
     /// `clock` supplies receipt timestamps and signing time; live callers pass

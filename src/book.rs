@@ -111,6 +111,28 @@ impl BookStore {
         self.metrics.resync_requests = self.metrics.resync_requests.saturating_add(1);
     }
 
+    /// Apply an event and report which contracts the solver must re-evaluate.
+    ///
+    /// The dirty set is a `Vec`, not a set or an iterator, so the engine walks
+    /// it in a fixed order and replay produces the same evaluation sequence as
+    /// the live run did.
+    ///
+    /// Nothing is marked dirty when the outcome left no book `Live`. A gap or a
+    /// disconnect moves every book to `Resyncing`, and the solver refuses a
+    /// group containing one, so handing those contracts over would be work whose
+    /// only possible result is a `not_live` rejection per group.
+    pub fn apply_and_mark(&mut self, event: &FeedEvent) -> (Applied, Vec<ContractId>) {
+        let applied = self.apply(event);
+        let dirty = match applied {
+            Applied::Snapshot(contract) | Applied::Delta(contract) => vec![contract],
+            Applied::Skipped
+            | Applied::Gap { .. }
+            | Applied::UnknownContract
+            | Applied::Invalidated => Vec::new(),
+        };
+        (applied, dirty)
+    }
+
     pub fn apply(&mut self, event: &FeedEvent) -> Applied {
         match event {
             FeedEvent::Snapshot {
