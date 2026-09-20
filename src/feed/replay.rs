@@ -202,8 +202,15 @@ impl ReplayFeed {
             }
             match self.read_batch() {
                 Ok(Some(received_at_ms)) => {
-                    self.pace_to(received_at_ms).await;
+                    // Before the sleep, not after. `read_batch` has already
+                    // buffered the events, so this await is a cancellation
+                    // point: a caller that selects over several feeds drops the
+                    // loser's future, and advancing afterwards would leave those
+                    // events queued against a clock that never moved. The value
+                    // is the same either way; only the ordering around the
+                    // pacing sleep changes.
                     self.clock.advance_to(received_at_ms);
+                    self.pace_to(received_at_ms).await;
                 }
                 Ok(None) => self.done = true,
                 Err(error) => {

@@ -1,4 +1,5 @@
 pub mod kalshi;
+pub mod merged;
 pub mod polymarket;
 pub mod replay;
 pub mod rest;
@@ -56,6 +57,17 @@ pub enum FeedEvent {
 
 /// Object-safe async boundary without adding an async-trait dependency.
 pub trait Feed: Send {
+    /// The next event, or `None` when the feed is finished.
+    ///
+    /// # Must be cancel-safe
+    ///
+    /// [`merged::MergedFeed`] selects across several feeds and drops the
+    /// losing future, so an implementation must not leave state half-advanced
+    /// at an await point. Anything read from the transport before an await has
+    /// to be buffered where the next call will find it, and any clock or
+    /// counter that belongs to it must move at the same time — not afterwards.
+    /// An implementation that breaks this loses events silently, and only when
+    /// two venues happen to be busy at once.
     fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<FeedEvent>> + Send + '_>>;
 
     /// Ask the venue for a fresh snapshot after a sequence gap.
