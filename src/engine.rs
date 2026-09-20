@@ -46,6 +46,7 @@ pub struct Signal {
     pub fees_cents: Cents,
     pub net_cents: Cents,
     pub annualized_return_percent: f64,
+    pub days_to_resolution: f64,
     pub legs: Vec<SignalLeg>,
 }
 
@@ -78,6 +79,7 @@ impl OpportunitySink for SignalLog {
             fees_cents: opportunity.fees_cents,
             net_cents: opportunity.net_cents,
             annualized_return_percent: opportunity.annualized_return_percent(),
+            days_to_resolution: opportunity.days_to_resolution,
             legs: opportunity
                 .legs
                 .iter()

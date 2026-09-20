@@ -185,12 +185,13 @@ export const mockOpportunities: Opportunity[] = [
 
 export const mockHealth: HealthSnapshot = {
   connected: true,
-  messagesPerSecond: 342,
+  messagesReceived: 42_816,
+  parseErrors: 0,
   gapCount: 0,
   latencyP50: 2.3,
+  latencyP95: 3.7,
   latencyP99: 4.1,
-  uptime: '18h 42m',
-  contractsTracked: 1_284,
+  reconnections: 0,
 }
 
 export const mockCoherenceEvents: CoherenceEvent[] = [

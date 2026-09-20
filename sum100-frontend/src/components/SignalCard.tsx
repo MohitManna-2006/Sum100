@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Opportunity } from '../api/types'
 import styles from './SignalCard.module.css'
 
@@ -5,7 +6,33 @@ interface SignalCardProps {
   signal: Opportunity
 }
 
-export function SignalCard({ signal }: SignalCardProps) {
+function sameSignal(previous: Opportunity, next: Opportunity) {
+  return (
+    previous.id === next.id &&
+    previous.pair === next.pair &&
+    previous.event === next.event &&
+    previous.edge === next.edge &&
+    previous.annualizedReturn === next.annualizedReturn &&
+    previous.daysToResolution === next.daysToResolution &&
+    previous.status === next.status &&
+    previous.reason === next.reason &&
+    previous.detectedAt === next.detectedAt &&
+    previous.legs.length === next.legs.length &&
+    previous.legs.every((leg, index) => {
+      const nextLeg = next.legs[index]
+      return (
+        leg.contract === nextLeg.contract &&
+        leg.venue === nextLeg.venue &&
+        leg.action === nextLeg.action &&
+        leg.price === nextLeg.price &&
+        leg.size === nextLeg.size &&
+        leg.fee === nextLeg.fee
+      )
+    })
+  )
+}
+
+export const SignalCard = memo(function SignalCard({ signal }: SignalCardProps) {
   return (
     <article className={styles.card}>
       <header className={styles.header}>
@@ -50,7 +77,10 @@ export function SignalCard({ signal }: SignalCardProps) {
 
       <footer className={styles.footer}>
         <span className={styles.reason}>
-          {signal.reason ?? `Detected ${signal.detectedAt}`}
+          {signal.reason ??
+            (signal.detectedAt
+              ? `Detected ${signal.detectedAt}`
+              : 'Live engine signal')}
         </span>
         <div className={styles.metricGroup}>
           <span className={styles.metric}>
@@ -65,4 +95,4 @@ export function SignalCard({ signal }: SignalCardProps) {
       </footer>
     </article>
   )
-}
+}, (previous, next) => sameSignal(previous.signal, next.signal))

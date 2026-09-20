@@ -13,7 +13,7 @@ export function HealthStrip({ health, compact = false }: HealthStripProps) {
       value: health.connected ? 'Connected' : 'Disconnected',
       connection: true,
     },
-    { label: 'Messages / sec', value: health.messagesPerSecond.toLocaleString() },
+    { label: 'Messages received', value: health.messagesReceived.toLocaleString() },
     { label: 'Sequence gaps', value: health.gapCount.toLocaleString() },
     { label: 'Latency p50', value: `${health.latencyP50.toFixed(1)} ms` },
     { label: 'Latency p99', value: `${health.latencyP99.toFixed(1)} ms` },

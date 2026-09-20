@@ -1,0 +1,84 @@
+.state {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  border: var(--border);
+}
+
+.inner {
+  display: grid;
+  max-width: 420px;
+  justify-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xl);
+  text-align: center;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  margin-bottom: var(--spacing-sm);
+  border: 2px solid var(--color-neutral-2);
+  border-top-color: var(--color-accent-info);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+.title {
+  margin: 0;
+  color: var(--color-neutral-4);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.detail {
+  margin: 0;
+  color: var(--color-neutral-3);
+  font-size: var(--font-size-xs);
+}
+
+.reconnect {
+  height: 32px;
+  margin-top: var(--spacing-sm);
+  padding: 0 12px;
+  border: var(--border);
+  border-radius: 4px;
+  color: var(--color-neutral-4);
+  background: transparent;
+  font-size: var(--font-size-xs);
+}
+
+.reconnect:hover {
+  background: var(--color-neutral-1);
+}
+
+.banner {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-md);
+  border-bottom: 1px solid #582525;
+  color: #fecaca;
+  background: #241313;
+  font-size: var(--font-size-xs);
+}
+
+.banner .reconnect {
+  height: 26px;
+  margin: 0;
+  border-color: #7f3131;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1400ms;
+  }
+}

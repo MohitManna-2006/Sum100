@@ -21,18 +21,21 @@ export interface Opportunity {
   daysToResolution: number
   status: SignalStatus
   reason?: string
-  detectedAt: string
+  detectedAt?: string
 }
 
 export interface HealthSnapshot {
   connected: boolean
-  messagesPerSecond: number
+  messagesReceived: number
+  parseErrors: number
   gapCount: number
   latencyP50: number
+  latencyP95: number
   latencyP99: number
-  uptime: string
-  contractsTracked: number
+  reconnections: number
 }
+
+export type ConnectionPhase = 'connecting' | 'connected' | 'reconnecting' | 'offline'
 
 export interface CoherenceOutcome {
   label: string

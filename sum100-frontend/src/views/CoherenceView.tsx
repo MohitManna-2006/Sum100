@@ -24,7 +24,7 @@ export function CoherenceView({ events }: CoherenceViewProps) {
         <div>
           <h2 className={styles.title}>Outcome coherence</h2>
           <p className={styles.subtitle}>
-            Exhaustive outcome groups measured against the 100¢ settlement target.
+            Preview data · awaiting the backend coherence state contract.
           </p>
         </div>
         <select

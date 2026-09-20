@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import type { Opportunity, SignalStatus, SortKey } from '../api/types'
 import { Modal } from '../components/Modal'
 import { SignalCard } from '../components/SignalCard'
@@ -11,7 +11,9 @@ interface OpportunitiesViewProps {
 
 const PAGE_SIZE = 7
 
-export function OpportunitiesView({ opportunities }: OpportunitiesViewProps) {
+export const OpportunitiesView = memo(function OpportunitiesView({
+  opportunities,
+}: OpportunitiesViewProps) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<SignalStatus | 'all'>('all')
   const [sort, setSort] = useState<SortKey>('return')
@@ -147,4 +149,4 @@ export function OpportunitiesView({ opportunities }: OpportunitiesViewProps) {
       ) : null}
     </section>
   )
-}
+})

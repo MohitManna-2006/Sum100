@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use futures_util::StreamExt;
 use std::{
     io::Write,
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -151,6 +152,9 @@ enum Command {
         /// Write the accepted signal log as JSON.
         #[arg(long, value_name = "PATH")]
         signals_out: Option<PathBuf>,
+        /// Dashboard API listen address.
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        serve: SocketAddr,
     },
     /// Registry inspection.
     Registry {
@@ -573,6 +577,7 @@ async fn main() -> Result<()> {
             pace,
             session,
             signals_out,
+            serve,
         } => {
             ensure!(
                 live ^ replay.is_some(),
@@ -587,6 +592,11 @@ async fn main() -> Result<()> {
             // One subscriber so the engine actually builds state; it publishes
             // nothing when nobody is listening.
             let (broadcast_tx, _) = broadcast::channel::<EngineState>(256);
+            let api_listener = tokio::net::TcpListener::bind(serve)
+                .await
+                .with_context(|| format!("binding dashboard API at {serve}"))?;
+            tracing::info!(address = %serve, "dashboard API listening");
+            let api_task = tokio::spawn(sum100::api::serve(api_listener, broadcast_tx.clone()));
             let mut states = broadcast_tx.subscribe();
             let drain = tokio::spawn(async move {
                 let (mut received, mut lagged) = (0u64, 0u64);
@@ -673,6 +683,8 @@ async fn main() -> Result<()> {
                 }
             };
 
+            api_task.abort();
+            let _ = api_task.await;
             drop(broadcast_tx);
             let (states_received, states_lagged) = drain.await?;
             print_scan_report(&engine, states_received, states_lagged);
